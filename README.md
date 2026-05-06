@@ -1,10 +1,12 @@
-# Auto Model Selector for Claude Code
+# Claude Code Effort Router
 
-A `UserPromptSubmit` hook for [Claude Code](https://claude.com/claude-code) that auto-tunes the **thinking budget** per turn. Trivial prompts run cheap, complex ones get escalated to `think hard` or `ultrathink`, and research-heavy prompts get a nudge to spawn a Task subagent. The driver model stays the same all session — only effort changes per turn.
+A `UserPromptSubmit` hook for [Claude Code](https://claude.com/claude-code) that auto-tunes the **thinking budget** per turn. Trivial prompts run cheap, complex ones get escalated to `think hard` or `ultrathink`, and research-heavy prompts get a nudge to spawn a Task subagent. The driver model stays the same for the whole session — only effort changes per turn.
 
-## Why not auto-swap models?
+## Background: why a hook, not an MCP server
 
-The original idea was an MCP server that swaps Claude Code's model based on task complexity. That doesn't work: Claude Code's driver model is fixed at session launch, and an MCP tool can only return strings, not reconfigure the host. What *does* work is modulating the per-turn thinking budget via Claude Code's documented trigger words (`think`, `think hard`, `ultrathink`), which a hook can inject before each turn.
+This repo started as an MCP server that tried to swap Claude Code's model based on task complexity. That approach doesn't work — an MCP tool can only return strings to Claude, not reconfigure the host. The driver model is fixed at session launch and can only be changed by `/model` or relaunching with `--model`.
+
+What *does* work is modulating the per-turn thinking budget via Claude Code's documented trigger words (`think`, `think hard`, `ultrathink`). A `UserPromptSubmit` hook can inject one of those into the additional context for the current turn, escalating effort only when the prompt warrants it. That's what this repo now is.
 
 ## How it works
 
@@ -54,13 +56,15 @@ model-summary/              # Reference docs — used to seed the keyword lists,
 
 Prerequisite: Windows PowerShell 5.1 or later (preinstalled on Windows 10/11).
 
-1. Clone the repo and `cd` into it.
-2. Open a fresh Claude Code session in this directory: `claude --model claude-opus-4-7`.
-3. Claude Code picks up [.claude/settings.json](.claude/settings.json) on session start and runs the hook on every prompt.
+```
+git clone https://github.com/Qcko/claude-code-effort-router.git
+cd claude-code-effort-router
+claude --model claude-opus-4-7
+```
 
-That's it. There is no build step.
+Claude Code picks up [.claude/settings.json](.claude/settings.json) on session start and runs the hook on every prompt. There is no build step.
 
-To verify it's working, submit a complex prompt and then check `hooks/routing-log.jsonl` — you should see a JSONL entry per submitted prompt.
+To verify it's working, submit a non-trivial prompt and check `hooks/routing-log.jsonl` — you should see a JSONL entry per submitted prompt with the score and tier the hook chose.
 
 ## Tuning
 
