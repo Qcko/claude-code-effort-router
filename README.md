@@ -47,31 +47,61 @@ model-summary/              # Reference docs — used to seed the keyword lists,
 ├── claude-haiku.md
 ├── claude-sonnet.md
 └── claude-opus.md
-
-.claude/
-└── settings.json           # Wires route-hint.ps1 as a UserPromptSubmit hook (project-scoped)
 ```
 
 ## Setup
 
 Prerequisite: Windows PowerShell 5.1 or later (preinstalled on Windows 10/11).
 
-```
+The hook is meant to fire in **every Claude Code session**, not just sessions opened in this repo. Install it user-globally:
+
+```powershell
 git clone https://github.com/Qcko/claude-code-effort-router.git
 cd claude-code-effort-router
-claude --model claude-opus-4-7
+
+# 1. Copy the script to your user-global Claude folder so it survives repo moves.
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\hooks" | Out-Null
+Copy-Item hooks\route-hint.ps1 "$env:USERPROFILE\.claude\hooks\route-hint.ps1" -Force
+
+# 2. Wire it into your user-global settings.
+#    If $env:USERPROFILE\.claude\settings.json already exists, merge the "hooks"
+#    block manually instead of overwriting.
+@'
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"REPLACE_ME\\.claude\\hooks\\route-hint.ps1\""
+          }
+        ]
+      }
+    ]
+  }
+}
+'@ -replace 'REPLACE_ME', ($env:USERPROFILE -replace '\\','\\') | Set-Content "$env:USERPROFILE\.claude\settings.json" -Encoding utf8
 ```
 
-Claude Code picks up [.claude/settings.json](.claude/settings.json) on session start and runs the hook on every prompt. There is no build step.
+Now any new Claude Code session, in any project, runs the hook on every prompt. The script logs decisions to `$env:USERPROFILE\.claude\hooks\routing-log.jsonl` (each entry includes the `project` it fired in, so you can see routing behavior across all your repos in one file).
 
-To verify it's working, submit a non-trivial prompt and check `hooks/routing-log.jsonl` — you should see a JSONL entry per submitted prompt with the score and tier the hook chose.
+To verify, start any Claude Code session, submit a non-trivial prompt, then run:
+```powershell
+Get-Content "$env:USERPROFILE\.claude\hooks\routing-log.jsonl" -Tail 1
+```
+
+### Updating after a repo change
+
+The user-global copy at `$env:USERPROFILE\.claude\hooks\route-hint.ps1` is the live one. After pulling new keyword tweaks from this repo, re-run the `Copy-Item` step to deploy them.
 
 ## Tuning
 
 The keyword sets and score thresholds are at the top of [hooks/route-hint.ps1](hooks/route-hint.ps1). After running with the hook for a while:
 
-1. Open `hooks/routing-log.jsonl` and look for entries where the tier feels wrong (trivial work scored as `ultrathink`, or hard work scored `none`).
-2. Adjust keyword lists or score thresholds in `route-hint.ps1`.
+1. Open `$env:USERPROFILE\.claude\hooks\routing-log.jsonl` and look for entries where the tier feels wrong (trivial work scored as `ultrathink`, or hard work scored `none`).
+2. Adjust keyword lists or score thresholds in `$env:USERPROFILE\.claude\hooks\route-hint.ps1` (or the repo copy followed by re-deploy).
 3. Changes take effect on the next prompt — no restart needed.
 
 ## Limits & caveats
@@ -80,7 +110,7 @@ The keyword sets and score thresholds are at the top of [hooks/route-hint.ps1](h
 - **Trigger words arrive as hook-injected context**, not as part of your literal user message. The hook also prints an explicit prose hint (`[auto-router] complexity score N -> applying thinking budget: ultrathink`) so Claude reasons accordingly even if the keyword detector only scans user text.
 - **Subagent suggestions are nudges, not enforcement.** Claude decides whether to actually call the Task tool. In practice this is reliable when the suggestion clearly applies, but not 100%.
 - **Hook latency:** roughly 150–300 ms per prompt for PowerShell startup. Acceptable but real.
-- **Privacy:** the routing log records a 80-character preview of each prompt. The full file is gitignored. Delete it any time.
+- **Privacy:** the routing log records an 80-character preview of each prompt and the project path it fired in. The file lives in your user-global Claude folder and is never committed. Delete it any time.
 
 ## Updating model IDs
 
