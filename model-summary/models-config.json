@@ -1,0 +1,86 @@
+{
+  "models": {
+    "haiku": {
+      "id": "claude-haiku-4-5-20251001",
+      "summaryAboutModel": "Haiku 4.5",
+      "displayName": "Claude Haiku 4.5",
+      "tier": "lightweight",
+      "characteristics": {
+        "latency_ms": { "min": 50, "typical": 100, "max": 200 },
+        "cost_per_1m_input_tokens": 0.80,
+        "cost_per_1m_output_tokens": 4.00,
+        "reasoning_score": 2,
+        "knowledge_breadth": 2,
+        "creative_score": 2,
+        "code_quality": 2
+      },
+      "ideal_for": [
+        "real-time-chat", "simple-classification", "fast-q&a", "content-filtering",
+        "text-formatting", "high-volume-api", "routing-decisions", "basic-summaries",
+        "explain", "summarize", "comment", "format", "classify", "simple", "quick"
+      ],
+      "avoid_for": [
+        "complex-reasoning", "novel-problems", "creative-content",
+        "specialized-domains", "long-document-analysis", "sophisticated-code-architecture"
+      ]
+    },
+    "sonnet": {
+      "id": "claude-sonnet-4-6",
+      "summaryAboutModel": "Sonnet 4.6",
+      "displayName": "Claude Sonnet 4.6",
+      "tier": "balanced",
+      "characteristics": {
+        "latency_ms": { "min": 300, "typical": 500, "max": 1500 },
+        "cost_per_1m_input_tokens": 3.00,
+        "cost_per_1m_output_tokens": 15.00,
+        "reasoning_score": 4,
+        "knowledge_breadth": 4,
+        "creative_score": 3,
+        "code_quality": 4
+      },
+      "ideal_for": [
+        "production-applications", "code-generation", "document-processing",
+        "business-analysis", "content-moderation", "customer-support",
+        "batch-processing", "general-writing", "refactor", "generate", "improve"
+      ],
+      "avoid_for": [
+        "ultra-low-latency-required", "extreme-cost-sensitivity"
+      ]
+    },
+    "opus": {
+      "id": "claude-opus-4-7",
+      "summaryAboutModel": "Opus 4.7",
+      "displayName": "Claude Opus 4.7",
+      "tier": "premium",
+      "characteristics": {
+        "latency_ms": { "min": 1000, "typical": 2000, "max": 5000 },
+        "cost_per_1m_input_tokens": 15.00,
+        "cost_per_1m_output_tokens": 75.00,
+        "reasoning_score": 5,
+        "knowledge_breadth": 5,
+        "creative_score": 5,
+        "code_quality": 5
+      },
+      "ideal_for": [
+        "complex-reasoning", "research-synthesis", "strategic-planning",
+        "code-architecture", "creative-content", "edge-case-handling",
+        "novel-problem-solving", "comprehensive-analysis",
+        "architecture", "design", "research", "complex", "strategic", "creative",
+        "deep analysis", "system-wide", "multi-file"
+      ],
+      "avoid_for": [
+        "high-volume-low-complexity", "real-time-latency-critical",
+        "cost-sensitive-operations", "simple-classification-tasks"
+      ]
+    }
+  },
+  "metadata": {
+    "summaryCreatedByModel": "claude-opus-4-7",
+    "summaryCreatedAt": "2026-05-06",
+    "summaryNotes": "Update this metadata when a new Claude model version ships or routing changes."
+  },
+  "routing_rules": {
+    "small_file_lines_max": 500,
+    "large_file_lines_min": 5000
+  }
+}

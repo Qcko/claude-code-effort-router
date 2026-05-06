@@ -1,59 +1,17 @@
-# Build output
-bin/
-obj/
-**/bin/
-**/obj/
-
-# Visual Studio
-.vs/
-*.suo
-*.user
-*.userosscache
-*.sln.docstates
-
-# Rider
-.idea/
-*.sln.iml
-
-# NuGet
-*.nupkg
-*.snupkg
-project.lock.json
-packages/
-
-# ASP.NET Scaffolding
-.scaffolded/
-
-# User-specific files
-*.dbmdl
-*.VC.db
-*.pfx
-*.publishsettings
-
 # OS generated files
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
+# Editor / IDE
+.vs/
+.idea/
+*.swp
 
-# Test results
-TestResults/
+# Auto-router runtime log
+hooks/routing-log.jsonl
 
-# Generated files
-*.g.cs
-*.generated.cs
-*.g.i.cs
-*.i.cs
-
-# Runtime
-*.runtimeconfig.json
-*.deps.json
-
-# Temporary files
-*.tmp
-*.temp
-
-# local environment
+# Local environment
 .env
-local.settings.json
+
+# Claude Code local overrides
+.claude/settings.local.json

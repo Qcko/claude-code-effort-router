@@ -1,198 +1,86 @@
 # Auto Model Selector for Claude Code
 
-A custom MCP (Model Context Protocol) server written in C# that automatically selects the appropriate Claude model (Haiku, Sonnet, or Opus) based on task type, file size, and user prompt complexity.
+A `UserPromptSubmit` hook for [Claude Code](https://claude.com/claude-code) that auto-tunes the **thinking budget** per turn. Trivial prompts run cheap, complex ones get escalated to `think hard` or `ultrathink`, and research-heavy prompts get a nudge to spawn a Task subagent. The driver model stays the same all session — only effort changes per turn.
 
-## Goal
+## Why not auto-swap models?
 
-This MCP server provides a "chooseModel" tool that returns a JSON response indicating which Claude model to use for the next action. Claude Code can then route requests to the selected model, optimizing token usage by avoiding unnecessary Opus calls for simple tasks.
+The original idea was an MCP server that swaps Claude Code's model based on task complexity. That doesn't work: Claude Code's driver model is fixed at session launch, and an MCP tool can only return strings, not reconfigure the host. What *does* work is modulating the per-turn thinking budget via Claude Code's documented trigger words (`think`, `think hard`, `ultrathink`), which a hook can inject before each turn.
 
-## Features
+## How it works
 
-- **chooseModel Tool**: Takes `userPrompt` (string), `fileSize` (int), and `taskType` (string) as inputs
-- **Intelligent Routing**: Uses model summaries from `model-summary/` folder for data-driven decisions
-- **Dynamic Model IDs**: Loads current model identifiers from configuration
-- **Lightweight**: No file content required, only metadata
-- **MCP Compliant**: Built with official ModelContextProtocol SDK
-- **Configurable**: Supports both structured config and fallback logic
+1. You launch Claude Code with Opus as the driver: `claude --model claude-opus-4-7`.
+2. On every prompt, Claude Code runs [hooks/route-hint.ps1](hooks/route-hint.ps1).
+3. The script scores the prompt (keywords + length + file refs) and prints a short context block — empty for trivial prompts, or a thinking-trigger word + reasoning hint for harder ones.
+4. Claude reads that hint as additional context for the current turn only and adjusts its thinking accordingly.
+5. Each decision is appended to `hooks/routing-log.jsonl` (gitignored) so you can tune the keyword sets later.
 
-## Model Selection Logic
+### Tier mapping
 
-The server now uses the `model-summary` folder for intelligent model selection:
+| Score | Tier         | Effect                                                                  |
+|------:|--------------|-------------------------------------------------------------------------|
+|  < 1  | (none)       | Hook stays silent. No extra thinking budget.                            |
+|  1–3  | `think`      | Light thinking budget for the current turn.                             |
+|  4–6  | `think hard` | Larger thinking budget.                                                  |
+|  ≥ 7  | `ultrathink` | Maximum thinking budget. If the prompt is also research-heavy, the hook adds a one-line note recommending a Task subagent. |
 
-- **Loads model configurations** from `model-summary/models-config.json` for available models and their characteristics
-- **Implements routing logic** based on the `routing-guide.md` decision tree:
-  - **Haiku**: For low-complexity tasks (<500 lines) and simple operations (explain, summarize, comment, format)
-  - **Sonnet**: Default for medium-complexity tasks (500-5000 lines) and standard coding/business tasks
-  - **Opus**: For high-complexity tasks (>5000 lines) and architecture-level reasoning (design, research, complex analysis)
-- **Fallback**: Uses hardcoded model names if config file is not found
+Score inputs (all heuristic, tunable in the script):
 
-## Project Structure
+- **Strong keywords** (+3): architecture, redesign, refactor, debug, investigate, root cause, race condition, deadlock, performance, optimize, security, vulnerability, comprehensive, thoroughly, system-wide, audit, across the codebase, why does, design, strategy, analyze, plan, …
+- **Medium keywords** (+1): implement, build, create, add, write, generate, fix, update, modify, change, integrate, migrate
+- **Trivial keywords** (-2): rename, format, show me, list, what does, what is, print, display, add a comment, tell me
+- **Subagent hints** (+2 and flag): research, audit, find all, every file, all references, search the codebase, …
+- **Length bonus**: ≥1500 chars +3, ≥500 +2, ≥200 +1, <60 -2
+- **File refs**: ≥3 references +2, ≥1 +1
+
+## Repository layout
 
 ```
-AutoModelSelectorMCP/
-├── Program.cs          # Server bootstrap and hosting
-├── Tools.cs            # MCP tool definitions with config loading
-├── config.json         # Legacy configuration file (optional)
-└── AutoModelSelectorMCP.csproj  # Project file
+hooks/
+└── route-hint.ps1          # Scoring + hint-emitting script (UserPromptSubmit hook)
 
-model-summary/
-├── README.md           # Overview of model summaries
-├── routing-guide.md    # Decision tree for model selection
-├── models-config.json  # Structured model configurations
-├── claude-haiku.md     # Detailed Haiku profile
-├── claude-sonnet.md    # Detailed Sonnet profile
-└── claude-opus.md      # Detailed Opus profile
+model-summary/              # Reference docs — used to seed the keyword lists, not loaded at runtime
+├── README.md
+├── routing-guide.md        # Decision tree for picking a tier
+├── models-config.json      # Catalog of current Claude model IDs and characteristics
+├── claude-haiku.md
+├── claude-sonnet.md
+└── claude-opus.md
+
+.claude/
+└── settings.json           # Wires route-hint.ps1 as a UserPromptSubmit hook (project-scoped)
 ```
 
-## Prerequisites
+## Setup
 
-- .NET 8.0 or later
-- Claude Code installed and authenticated
+Prerequisite: Windows PowerShell 5.1 or later (preinstalled on Windows 10/11).
 
-## Build Instructions
+1. Clone the repo and `cd` into it.
+2. Open a fresh Claude Code session in this directory: `claude --model claude-opus-4-7`.
+3. Claude Code picks up [.claude/settings.json](.claude/settings.json) on session start and runs the hook on every prompt.
 
-1. Navigate to the project directory:
-   ```bash
-   cd AutoModelSelectorMCP
-   ```
+That's it. There is no build step.
 
-2. Restore dependencies:
-   ```bash
-   dotnet restore
-   ```
+To verify it's working, submit a complex prompt and then check `hooks/routing-log.jsonl` — you should see a JSONL entry per submitted prompt.
 
-3. Build the project:
-   ```bash
-   dotnet build
-   ```
+## Tuning
 
-## Running the Server
+The keyword sets and score thresholds are at the top of [hooks/route-hint.ps1](hooks/route-hint.ps1). After running with the hook for a while:
 
-To run the server manually for testing:
-```bash
-dotnet run
-```
+1. Open `hooks/routing-log.jsonl` and look for entries where the tier feels wrong (trivial work scored as `ultrathink`, or hard work scored `none`).
+2. Adjust keyword lists or score thresholds in `route-hint.ps1`.
+3. Changes take effect on the next prompt — no restart needed.
 
-The server uses stdio transport and will listen for MCP protocol messages.
+## Limits & caveats
 
-## Loading and Updating Model Summaries
+- **Driver model is fixed at launch.** This hook only modulates *effort* per turn. To swap models you still need `/model` or to relaunch Claude Code.
+- **Trigger words arrive as hook-injected context**, not as part of your literal user message. The hook also prints an explicit prose hint (`[auto-router] complexity score N -> applying thinking budget: ultrathink`) so Claude reasons accordingly even if the keyword detector only scans user text.
+- **Subagent suggestions are nudges, not enforcement.** Claude decides whether to actually call the Task tool. In practice this is reliable when the suggestion clearly applies, but not 100%.
+- **Hook latency:** roughly 150–300 ms per prompt for PowerShell startup. Acceptable but real.
+- **Privacy:** the routing log records a 80-character preview of each prompt. The full file is gitignored. Delete it any time.
 
-The MCP server loads model metadata from `model-summary/model-summary/models-config.json` at runtime. You can update that file when new models or versions are released without changing the C# code.
+## Updating model IDs
 
-- Edit `model-summary/model-summary/models-config.json` to add new models, update model IDs, or adjust versioned model names.
-- The config now includes metadata such as `metadata.summaryCreatedByModel` and `metadata.summaryCreatedAt`, plus per-model `summaryAboutModel` values so you can track which specific model/version each summary is about.
-- Optionally set `MODEL_SUMMARY_CONFIG_PATH` to a custom file or directory if your summary files live outside the repository.
-- Use the `ReloadModelSummaries` tool to refresh the loaded configuration from disk.
-- Use the `GetAvailableModels` tool to verify which model IDs are currently loaded.
-
-Example:
-```bash
-claude mcp ...
-```
-
-## Connecting to Claude Code
-
-1. **Add the MCP Server**:
-   From your terminal (not inside Claude Code), run:
-   ```bash
-   claude mcp add --transport stdio auto-model-selector -- dotnet /path/to/AutoModelSelectorMCP.dll
-   ```
-   Replace `/path/to/AutoModelSelectorMCP.dll` with the absolute path to your compiled DLL (e.g., `E:\dev\Auto-model-selector-for-Claude\AutoModelSelectorMCP\bin\Debug\net10.0\AutoModelSelectorMCP.dll`).
-
-   For project scope (recommended for team sharing):
-   ```bash
-   claude mcp add --scope project --transport stdio auto-model-selector -- dotnet /path/to/AutoModelSelectorMCP.dll
-   ```
-
-2. **Start Claude Code**:
-   In your project directory:
-   ```bash
-   claude
-   ```
-
-3. **Verify Connection**:
-   Inside Claude Code, run `/mcp` to see connected servers. Your server should appear as "connected".
-
-4. **Test the Tool**:
-   You can now use the `chooseModel` tool. For example, Claude Code might invoke it automatically or you can test by prompting Claude to use the tool.
-
-## Tool Specification
-
-### chooseModel Tool
-
-**Inputs**:
-- `userPrompt` (string): The user's prompt describing the task
-- `fileSize` (int): The size of the file in lines
-- `taskType` (string): The type of task (e.g., "edit", "refactor", "explain", "generate")
-
-**Output**:
-A JSON object:
-```json
-{
-  "model": "claude-3.7-haiku" | "claude-3.7-sonnet" | "claude-3.7-opus"
-}
-```
-
-**Example Usage**:
-- Input: `userPrompt="Quickly explain this function"`, `fileSize=50`, `taskType="explain"`
-- Output: `{"model": "claude-3.7-haiku"}`
-
-## Configuration
-
-The `config.json` file allows tuning of the selection thresholds and keywords. Currently, the logic is hardcoded in `Tools.cs`, but you can extend the code to load this configuration.
-
-Example `config.json`:
-```json
-{
-  "haiku": {
-    "fileSizeMax": 500,
-    "taskTypes": ["explain", "summarize", "comment"],
-    "promptKeywords": ["quick", "simple", "small"]
-  },
-  "sonnet": {
-    "fileSizeMin": 500,
-    "fileSizeMax": 5000,
-    "taskTypes": ["refactor", "generate", "improve"],
-    "promptKeywords": ["optimize", "rewrite", "clean up"]
-  },
-  "opus": {
-    "fileSizeMin": 5000,
-    "taskTypes": [],
-    "promptKeywords": ["architecture", "design", "deep analysis", "system-wide", "multi-file"]
-  },
-  "defaultModel": "claude-3.7-haiku"
-}
-```
-
-## Publishing to NuGet
-
-To prepare for NuGet publication:
-
-1. Update the project file with package metadata:
-   ```xml
-   <PropertyGroup>
-     <PackageId>AutoModelSelectorMCP</PackageId>
-     <Version>1.0.0</Version>
-     <Authors>Your Name</Authors>
-     <Description>A MCP server for auto-selecting Claude models</Description>
-   </PropertyGroup>
-   ```
-
-2. Build and pack:
-   ```bash
-   dotnet pack -c Release
-   ```
-
-3. Publish:
-   ```bash
-   dotnet nuget push bin/Release/AutoModelSelectorMCP.1.0.0.nupkg -k YOUR_API_KEY -s https://api.nuget.org/v3/index.json
-   ```
-
-## Troubleshooting
-
-- **Server not connecting**: Ensure the DLL path is correct and `dotnet` is in your PATH. Test by running the server manually.
-- **Tool not found**: Run `/mcp` in Claude Code to check server status. Try `/reload-plugins`.
-- **Errors in logic**: Check the console output when running the server manually for debugging.
+When new Claude versions ship, update [model-summary/models-config.json](model-summary/models-config.json). The hook itself doesn't load this file — it's reference material — but keeping it current makes the per-model markdown profiles useful when you ask Claude "which model should I use for X?"
 
 ## License
 
