@@ -14,7 +14,7 @@ What *does* work is modulating the per-turn thinking budget via Claude Code's do
 2. On every prompt, Claude Code runs [hooks/route-hint.ps1](hooks/route-hint.ps1).
 3. The script scores the prompt (keywords + length + file refs) and prints a short context block — empty for trivial prompts, or a thinking-trigger word + reasoning hint for harder ones.
 4. Claude reads that hint as additional context for the current turn only and adjusts its thinking accordingly.
-5. Each decision is appended to `hooks/routing-log.jsonl` (gitignored) so you can tune the keyword sets later.
+5. Each decision is appended to `$env:USERPROFILE\.claude\hooks\routing-log.jsonl` (one log across all your projects) so you can tune the keyword sets later.
 
 ### Tier mapping
 
@@ -86,6 +86,8 @@ Copy-Item hooks\route-hint.ps1 "$env:USERPROFILE\.claude\hooks\route-hint.ps1" -
 ```
 
 Now any new Claude Code session, in any project, runs the hook on every prompt. The script logs decisions to `$env:USERPROFILE\.claude\hooks\routing-log.jsonl` (each entry includes the `project` it fired in, so you can see routing behavior across all your repos in one file).
+
+> **First run:** the first time the hook fires in a Claude Code session, Claude Code will prompt you to approve the new `UserPromptSubmit` hook command. Inspect [hooks/route-hint.ps1](hooks/route-hint.ps1) first if you didn't write it yourself — it's about 100 lines of PowerShell with no network calls or filesystem writes outside the log file.
 
 To verify, start any Claude Code session, submit a non-trivial prompt, then run:
 ```powershell
