@@ -25,14 +25,7 @@ What *does* work is modulating the per-turn thinking budget via Claude Code's do
 |  4–6  | `think hard` | Larger thinking budget.                                                  |
 |  ≥ 7  | `ultrathink` | Maximum thinking budget. If the prompt is also research-heavy, the hook adds a one-line note recommending a Task subagent. |
 
-Score inputs (all heuristic, tunable in the script):
-
-- **Strong keywords** (+3): architecture, redesign, refactor, debug, investigate, root cause, race condition, deadlock, performance, optimize, security, vulnerability, comprehensive, thoroughly, system-wide, audit, across the codebase, why does, design, strategy, analyze, plan, …
-- **Medium keywords** (+1): implement, build, create, add, write, generate, fix, update, modify, change, integrate, migrate
-- **Trivial keywords** (-2): rename, format, show me, list, what does, what is, print, display, add a comment, tell me
-- **Subagent hints** (+2 and flag): research, audit, find all, every file, all references, search the codebase, …
-- **Length bonus**: ≥1500 chars +3, ≥500 +2, ≥200 +1, <60 -2
-- **File refs**: ≥3 references +2, ≥1 +1
+For the full keyword lists, score inputs, and the rationale for these specific tiers, see [docs/efforts.md](docs/efforts.md).
 
 ## Repository layout
 
@@ -40,13 +33,8 @@ Score inputs (all heuristic, tunable in the script):
 hooks/
 └── route-hint.ps1          # Scoring + hint-emitting script (UserPromptSubmit hook)
 
-model-summary/              # Reference docs — used to seed the keyword lists, not loaded at runtime
-├── README.md
-├── routing-guide.md        # Decision tree for picking a tier
-├── models-config.json      # Catalog of current Claude model IDs and characteristics
-├── claude-haiku.md
-├── claude-sonnet.md
-└── claude-opus.md
+docs/
+└── efforts.md              # Reference: the four effort tiers and how the hook picks one
 ```
 
 ## Setup
@@ -114,9 +102,9 @@ The keyword sets and score thresholds are at the top of [hooks/route-hint.ps1](h
 - **Hook latency:** roughly 150–300 ms per prompt for PowerShell startup. Acceptable but real.
 - **Privacy:** the routing log records an 80-character preview of each prompt and the project path it fired in. The file lives in your user-global Claude folder and is never committed. Delete it any time.
 
-## Updating model IDs
+## Updating for new Claude versions
 
-When new Claude versions ship, update [model-summary/models-config.json](model-summary/models-config.json). The hook itself doesn't load this file — it's reference material — but keeping it current makes the per-model markdown profiles useful when you ask Claude "which model should I use for X?"
+When a new Claude model ships, just point your driver at it: `claude --model <new-id>`. The hook is model-agnostic — it operates on Claude Code's effort trigger words, which apply to any current Claude. No config files in this repo need updating.
 
 ## License
 
