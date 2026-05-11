@@ -33,6 +33,10 @@ For the full keyword lists, score inputs, and the rationale for these specific t
 hooks/
 └── route-hint.ps1          # Scoring + hint-emitting script (UserPromptSubmit hook)
 
+scripts/
+├── analyze-routing.ps1     # Join routing-log.jsonl with session transcripts; flag mis-routings
+└── run-analyzer.ps1        # Wrapper that writes analyzer output to a dated log file
+
 docs/
 └── efforts.md              # Reference: the four effort tiers and how the hook picks one
 ```
@@ -93,6 +97,17 @@ The keyword sets and score thresholds are at the top of [hooks/route-hint.ps1](h
 1. Open `$env:USERPROFILE\.claude\hooks\routing-log.jsonl` and look for entries where the tier feels wrong (trivial work scored as `ultrathink`, or hard work scored `none`).
 2. Adjust keyword lists or score thresholds in `$env:USERPROFILE\.claude\hooks\route-hint.ps1` (or the repo copy followed by re-deploy).
 3. Changes take effect on the next prompt — no restart needed.
+
+## Analyzer (optional)
+
+[scripts/analyze-routing.ps1](scripts/analyze-routing.ps1) reads `routing-log.jsonl` and joins each decision with the assistant turn that followed (from Claude Code's own session transcripts), flagging cases where the assigned tier probably didn't match the work — `think` prompts that produced 5k+ output, etc. Heuristics only, no LLM calls. Output is grouped by prompt preview so the same prompt run N times collapses to one row with a `hits` count.
+
+Run it ad hoc:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\analyze-routing.ps1 -Days 7
+```
+
+[scripts/run-analyzer.ps1](scripts/run-analyzer.ps1) is a thin wrapper that writes the output to `$env:USERPROFILE\.claude\hooks\routing-analysis-YYYY-MM-DD.log`. Wire it into a Windows Scheduled Task if you want a weekly digest without thinking about it.
 
 ## Limits & caveats
 
