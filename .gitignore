@@ -10,6 +10,9 @@ Thumbs.db
 # Auto-router runtime log
 hooks/routing-log.jsonl
 
+# Session handoff log — may contain transcript-like context, keep local
+SESSION.md
+
 # Local environment
 .env
 
