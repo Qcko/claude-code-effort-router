@@ -9,8 +9,10 @@
 - New behaviors added this session and present in **both** the repo file and `%USERPROFILE%\.claude\hooks\route-hint.ps1`:
   - Skip `<task-notification>` payloads before scoring or logging.
   - `+1` bonus when `refactor` matches (on top of the strong-list `+3`), so bare "refactor X" prompts clear the `think hard` boundary (≥4).
-- `%USERPROFILE%\.claude\scripts\analyze-routing.ps1` — flagged-entries section now deduplicates by `preview` and shows a `hits` count + `last_ts`, so a prompt run N times no longer drowns out distinct misses.
-- One commit on `claude/sleepy-grothendieck-8bb29c`, pushed to origin.
+- `scripts/analyze-routing.ps1` — flagged-entries section now deduplicates by `preview` and shows a `hits` count + `last_ts`, so a prompt run N times no longer drowns out distinct misses. **Moved in-repo this session** (was previously only in `%USERPROFILE%\.claude\scripts\`).
+- `scripts/run-analyzer.ps1` — thin wrapper for scheduled-task use, also moved in-repo.
+- `README.md` — new "Analyzer (optional)" section + layout block updated.
+- Two commits on `claude/sleepy-grothendieck-8bb29c`, pushed to origin (`0b25878`, `b37fb1c`).
 
 **State:**
 - Repo `hooks/route-hint.ps1` and deployed global hook are byte-identical aside from the header doc comment (repo says "canonical source", global says "user-global copy, edit canonical and re-deploy").
