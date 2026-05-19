@@ -43,7 +43,9 @@ $priorEndedWithQuestion = $false
 $transcriptPath = [string]$payload.transcript_path
 if ($transcriptPath -and (Test-Path -LiteralPath $transcriptPath)) {
     try {
-        $tail = Get-Content -LiteralPath $transcriptPath -Tail 50 -Encoding utf8 -ErrorAction Stop
+        # @() forces array context — single-line files otherwise come back as a
+        # bare [string], and $tail[$i] then indexes characters instead of lines.
+        $tail = @(Get-Content -LiteralPath $transcriptPath -Tail 50 -Encoding utf8 -ErrorAction Stop)
         for ($i = $tail.Count - 1; $i -ge 0; $i--) {
             $line = $tail[$i]
             if (-not $line -or -not $line.Trim()) { continue }
@@ -55,9 +57,9 @@ if ($transcriptPath -and (Test-Path -LiteralPath $transcriptPath)) {
             $fullText = (($textBlocks | ForEach-Object { $_.text }) -join "`n").TrimEnd()
             if (-not $fullText) { continue }
             $priorEndedWithQuestion = $fullText.EndsWith('?')
-            $sentence = if ($fullText.Length -gt 200) { $fullText.Substring($fullText.Length - 200) } else { $fullText }
+            $sentence = if ($fullText.Length -gt 500) { $fullText.Substring($fullText.Length - 500) } else { $fullText }
             $priorTail = ($sentence -replace "[`r`n]+", ' ').Trim()
-            if ($priorTail.Length -gt 150) { $priorTail = $priorTail.Substring($priorTail.Length - 150) }
+            if ($priorTail.Length -gt 400) { $priorTail = $priorTail.Substring($priorTail.Length - 400) }
             break
         }
     } catch { }
@@ -106,12 +108,24 @@ foreach ($kw in $execute)  { if ($lower.Contains($kw)) { $score += 3; $executeFi
 # Short affirmative answering a question the model just asked. "yes lets do
 # that" is in the execute list already; this catches the bare "yes" / "ok" /
 # "yep" / "do it" forms that carry no signal alone but commit to whatever was
-# proposed in the prior turn. Same weight as the explicit execute phrases.
+# proposed in the prior turn. Also catches numeric picks ("1", "do 1",
+# "option 2", "go with 1") and "go with your rec[ommendation]" — these
+# typically follow a ranked list of candidates per the GLaDOS offer-next-step
+# pattern. Same weight as the explicit execute phrases.
 if (-not $executeFired -and $priorEndedWithQuestion) {
-    if ($promptText -imatch '^\s*(yes|yep|yeah|sure|ok|okay|go|go ahead|do it|please do)\W*$') {
-        $score += 3
-        $executeFired = $true
-        $strongFired = $true
+    $affirmativePatterns = @(
+        '^\s*(yes|yep|yeah|sure|ok|okay|go|go ahead|do it|please do)\W*$',
+        '^\s*(do|go with|option|pick|choice)?\s*#?\s*[1-9]\W*$',
+        '^\s*go with (your |the )?(rec|recommendation|suggestion)\W*$',
+        '^\s*(your |the )?(rec|recommendation)\W*$'
+    )
+    foreach ($pat in $affirmativePatterns) {
+        if ($promptText -imatch $pat) {
+            $score += 3
+            $executeFired = $true
+            $strongFired = $true
+            break
+        }
     }
 }
 
