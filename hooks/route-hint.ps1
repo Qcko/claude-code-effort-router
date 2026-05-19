@@ -33,6 +33,36 @@ if ([string]::IsNullOrWhiteSpace($promptText)) { exit 0 }
 # consume a routing decision or pollute the log.
 if ($promptText.TrimStart().StartsWith('<task-notification>')) { exit 0 }
 
+# Peek at the prior assistant turn from the session transcript. The hook
+# payload's transcript_path points at the jsonl. A short user prompt like
+# "yes lets do that" carries no signal alone, but if the model just asked a
+# question the answer commits to whatever was proposed — usually real work.
+# Read tail-only so this stays cheap on long sessions.
+$priorTail = $null
+$priorEndedWithQuestion = $false
+$transcriptPath = [string]$payload.transcript_path
+if ($transcriptPath -and (Test-Path -LiteralPath $transcriptPath)) {
+    try {
+        $tail = Get-Content -LiteralPath $transcriptPath -Tail 50 -Encoding utf8 -ErrorAction Stop
+        for ($i = $tail.Count - 1; $i -ge 0; $i--) {
+            $line = $tail[$i]
+            if (-not $line -or -not $line.Trim()) { continue }
+            try { $obj = $line | ConvertFrom-Json } catch { continue }
+            if ($obj.type -ne 'assistant') { continue }
+            if (-not $obj.message -or -not $obj.message.content) { continue }
+            $textBlocks = @($obj.message.content | Where-Object { $_.type -eq 'text' -and $_.text })
+            if ($textBlocks.Count -eq 0) { continue }
+            $fullText = (($textBlocks | ForEach-Object { $_.text }) -join "`n").TrimEnd()
+            if (-not $fullText) { continue }
+            $priorEndedWithQuestion = $fullText.EndsWith('?')
+            $sentence = if ($fullText.Length -gt 200) { $fullText.Substring($fullText.Length - 200) } else { $fullText }
+            $priorTail = ($sentence -replace "[`r`n]+", ' ').Trim()
+            if ($priorTail.Length -gt 150) { $priorTail = $priorTail.Substring($priorTail.Length - 150) }
+            break
+        }
+    } catch { }
+}
+
 $lower = $promptText.ToLowerInvariant()
 $score = 0
 $suggestSubagent = $false
@@ -72,6 +102,18 @@ foreach ($kw in $strong)   { if ($lower.Contains($kw)) { $score += 3; $strongFir
 foreach ($kw in $subagent) { if ($lower.Contains($kw)) { $score += 2; $suggestSubagent = $true } }
 foreach ($kw in $medium)   { if ($lower.Contains($kw)) { $score += 1 } }
 foreach ($kw in $execute)  { if ($lower.Contains($kw)) { $score += 3; $executeFired = $true; $strongFired = $true } }
+
+# Short affirmative answering a question the model just asked. "yes lets do
+# that" is in the execute list already; this catches the bare "yes" / "ok" /
+# "yep" / "do it" forms that carry no signal alone but commit to whatever was
+# proposed in the prior turn. Same weight as the explicit execute phrases.
+if (-not $executeFired -and $priorEndedWithQuestion) {
+    if ($promptText -imatch '^\s*(yes|yep|yeah|sure|ok|okay|go|go ahead|do it|please do)\W*$') {
+        $score += 3
+        $executeFired = $true
+        $strongFired = $true
+    }
+}
 
 # Extra weight on 'refactor': analyzer showed typical refactor prompts produce
 # 28-48k output but were scoring 3 -> think. The +1 on top of the strong-list +3
@@ -181,15 +223,17 @@ try {
     $project = $env:CLAUDE_PROJECT_DIR
     if ([string]::IsNullOrWhiteSpace($project)) { $project = (Get-Location).Path }
     $entry = [ordered]@{
-        ts           = (Get-Date).ToUniversalTime().ToString('o')
-        project      = $project
-        score        = $score
-        tier         = $tier
-        intent       = $intent
-        promptLen    = $len
-        fileRefs     = $fileRefs
-        subagentHint = $suggestSubagent
-        preview      = $preview
+        ts                     = (Get-Date).ToUniversalTime().ToString('o')
+        project                = $project
+        score                  = $score
+        tier                   = $tier
+        intent                 = $intent
+        promptLen              = $len
+        fileRefs               = $fileRefs
+        subagentHint           = $suggestSubagent
+        priorEndedWithQuestion = $priorEndedWithQuestion
+        priorTail              = $priorTail
+        preview                = $preview
     } | ConvertTo-Json -Compress
     Add-Content -Path $logPath -Value $entry -Encoding utf8
 } catch {
