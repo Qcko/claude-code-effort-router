@@ -129,6 +129,24 @@ if (-not $executeFired -and $priorEndedWithQuestion) {
     }
 }
 
+# Scoping starter: sentence-initial signals that the prompt is opening a
+# multi-thread planning/scoping turn. Analyzer (2026-05-25 weekly) showed
+# ~20 of 36 under-served flags start with one of these phrases and produced
+# 5-25k output despite scoring 1-3. +2 nudges substantive ones over the
+# think-hard boundary while leaving truly short chatter at think.
+$scopingStarters = @(
+    '^\s*(lets|let''s)\s',
+    '^\s*we should\s',
+    '^\s*can we\s',
+    '^\s*imagine\s',
+    '^\s*another feature\b',
+    '^\s*we want\s',
+    '^\s*before .{0,40}(we|i) need\b'
+)
+foreach ($pat in $scopingStarters) {
+    if ($promptText -imatch $pat) { $score += 2; break }
+}
+
 # Extra weight on 'refactor': analyzer showed typical refactor prompts produce
 # 28-48k output but were scoring 3 -> think. The +1 on top of the strong-list +3
 # nudges a bare "refactor X" prompt over the think-hard boundary (>=4).
