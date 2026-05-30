@@ -10,7 +10,7 @@ What *does* work is modulating the per-turn thinking budget via Claude Code's do
 
 ## How it works
 
-1. You launch Claude Code with Opus as the driver: `claude --model claude-opus-4-7`.
+1. You launch Claude Code with Opus as the driver: `claude --model claude-opus-4-8`.
 2. On every prompt, Claude Code runs [hooks/route-hint.ps1](hooks/route-hint.ps1).
 3. The script scores the prompt (keywords + length + file refs) and prints a short context block — empty for trivial prompts, or a thinking-trigger word + reasoning hint for harder ones.
 4. Claude reads that hint as additional context for the current turn only and adjusts its thinking accordingly.
