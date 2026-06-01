@@ -106,45 +106,68 @@ foreach ($kw in $medium)   { if ($lower.Contains($kw)) { $score += 1 } }
 foreach ($kw in $execute)  { if ($lower.Contains($kw)) { $score += 3; $executeFired = $true; $strongFired = $true } }
 
 # Short affirmative answering a question the model just asked. "yes lets do
-# that" is in the execute list already; this catches the bare "yes" / "ok" /
-# "yep" / "do it" forms that carry no signal alone but commit to whatever was
-# proposed in the prior turn. Also catches numeric picks ("1", "do 1",
-# "option 2", "go with 1") and "go with your rec[ommendation]" — these
-# typically follow a ranked list of candidates per the GLaDOS offer-next-step
-# pattern. Same weight as the explicit execute phrases.
+# that" is in the execute list already; this catches the forms that carry no
+# signal alone but commit to whatever was proposed in the prior turn. Three
+# shapes, all per the GLaDOS offer-next-step pattern:
+#   - bare affirmations ("yes" / "ok" / "do it" / "go ahead")
+#   - affirmation + restatement ("yeah lets go for it", "yes please do")
+#   - committal directives ("lets do this", "lets fix both")
+#   - numeric / rec picks, with optional affirmation+commitment prefix
+#     ("1", "do 1", "lets do 1", "yeah lets do 1+3", "lets go with option 2",
+#      "go with your rec")
+# Analyzer (2026-06-01 weekly) showed the prior $-anchored patterns missed any
+# reply with a restatement tail or a lets/yeah-lets prefix — the dominant
+# real-world reply shape. Guarded so a question-back ("how can I do 1?") or a
+# negation ("nah I am already at 4") never fires. Same weight as execute phrases.
 if (-not $executeFired -and $priorEndedWithQuestion) {
-    $affirmativePatterns = @(
-        '^\s*(yes|yep|yeah|sure|ok|okay|go|go ahead|do it|please do)\W*$',
-        '^\s*(do|go with|option|pick|choice)?\s*#?\s*[1-9]\W*$',
-        '^\s*go with (your |the )?(rec|recommendation|suggestion)\W*$',
-        '^\s*(your |the )?(rec|recommendation)\W*$'
-    )
-    foreach ($pat in $affirmativePatterns) {
-        if ($promptText -imatch $pat) {
-            $score += 3
-            $executeFired = $true
-            $strongFired = $true
-            break
+    $promptTrimmed = $promptText.Trim()
+    $isQuestionBack = $promptTrimmed.EndsWith('?')
+    $isNegation = $promptTrimmed -imatch '^\s*(no|nah|nope|dont|don''t|do not|not)\b'
+    if (-not $isQuestionBack -and -not $isNegation) {
+        $affirmativePatterns = @(
+            '^\s*(yes|yep|yeah|ya|sure|ok|okay|k|go|go ahead|do it|please do|sounds good|sgtm)\W*$',
+            '^\s*(yes|yep|yeah|ya|sure|ok|okay|fine|alright|perfect|great)\s+\S',
+            '^\s*(lets|let''s)\s',
+            '^\s*(yes|yep|yeah|sure|ok|okay)?\s*(lets|let''s)?\s*(?:(?:do|go with|going with|option|opt|pick|choice|try|number|no\.?)\s*)*#?\s*[1-9](\s*\+\s*[1-9])?\W*$',
+            '^\s*(go with |use |pick )?(your |the )?(rec|recommendation|recommended|suggestion|suggested)\W*$'
+        )
+        foreach ($pat in $affirmativePatterns) {
+            if ($promptText -imatch $pat) {
+                $score += 3
+                $executeFired = $true
+                $strongFired = $true
+                break
+            }
         }
     }
 }
 
-# Scoping starter: sentence-initial signals that the prompt is opening a
-# multi-thread planning/scoping turn. Analyzer (2026-05-25 weekly) showed
-# ~20 of 36 under-served flags start with one of these phrases and produced
-# 5-25k output despite scoring 1-3. +2 nudges substantive ones over the
-# think-hard boundary while leaving truly short chatter at think.
-$scopingStarters = @(
-    '^\s*(lets|let''s)\s',
-    '^\s*we should\s',
-    '^\s*can we\s',
-    '^\s*imagine\s',
-    '^\s*another feature\b',
-    '^\s*we want\s',
-    '^\s*before .{0,40}(we|i) need\b'
-)
-foreach ($pat in $scopingStarters) {
-    if ($promptText -imatch $pat) { $score += 2; break }
+# Scoping starter: signals that the prompt is opening a multi-thread
+# planning/scoping turn. Analyzer (2026-05-25 weekly) showed ~20 of 36
+# under-served flags start with one of these phrases and produced 5-25k output
+# despite scoring 1-3. +2 nudges substantive ones over the think-hard boundary
+# while leaving truly short chatter at think. The 2026-06-01 pass showed a
+# leading preamble was defeating the old strict ^\s* anchor ("ok lets...",
+# "then lets...", "did we keep the logs? we should..."), so an optional short
+# filler word and an optional brief opening clause are allowed ahead of the
+# starter. Skipped entirely when the affirmative path already fired, so a
+# committal "lets do 1" reply scores a clean +3 (think) instead of stacking to
+# think hard on a possibly-trivial directive.
+if (-not $executeFired) {
+    $preClause = '(?:[^?.!]{0,60}[?.!]\s+)?'
+    $pre = '(?:(?:ok|okay|so|then|well|now|also|and|but|right|alright|hmm|hey)\b[\s,]+){0,2}'
+    $scopingStarters = @(
+        "^\s*$preClause$pre(lets|let's)\s",
+        "^\s*$preClause$pre(we should|should we)\s",
+        "^\s*$preClause$pre(can we|could we)\s",
+        "^\s*$preClause$pre(we want|we need to|we either)\b",
+        "^\s*$preClause$pre(imagine)\s",
+        "^\s*$preClause$pre(another feature)\b",
+        '^\s*before .{0,40}(we|i) need\b'
+    )
+    foreach ($pat in $scopingStarters) {
+        if ($promptText -imatch $pat) { $score += 2; break }
+    }
 }
 
 # Extra weight on 'refactor': analyzer showed typical refactor prompts produce
