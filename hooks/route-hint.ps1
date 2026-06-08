@@ -70,6 +70,7 @@ $score = 0
 $suggestSubagent = $false
 $strongFired = $false
 $executeFired = $false
+$affirmativeFired = $false
 
 $strong = @(
     'architecture', 'redesign', 'refactor', 'debug ', 'investigate', 'root cause',
@@ -136,10 +137,26 @@ if (-not $executeFired -and $priorEndedWithQuestion) {
                 $score += 3
                 $executeFired = $true
                 $strongFired = $true
+                $affirmativeFired = $true
                 break
             }
         }
     }
+}
+
+# priorTail weighting: a committal pick scores a clean +3 -> think, one point
+# under the think-hard boundary. But when the prior turn was a ranked list or
+# multi-option planning turn, the pick commits to large work — the 2026-06-08
+# weekly pass showed these committal picks ("lets do 1", "lets go with v3 slice
+# 3b", "yeah lets do the cleanup") routinely drove 30k-215k-token runs while
+# sitting at think/3. +1 here pushes them over the boundary, but only when
+# priorTail shows real scope (2+ ranked markers or an option/slice/approach
+# word), so bare "yes"/"ok" answering a small question stays at think. priorTail
+# was captured + logged but unused in scoring until now.
+if ($affirmativeFired -and $priorTail) {
+    $rankedMarkers = ([regex]::Matches($priorTail, '(?:^|\s)#?[1-9][.):]')).Count
+    $hasOptionWord = $priorTail -imatch '\b(option|options|slice|approach|alternative)\b'
+    if ($rankedMarkers -ge 2 -or $hasOptionWord) { $score += 1 }
 }
 
 # Scoping starter: signals that the prompt is opening a multi-thread
