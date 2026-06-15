@@ -16,6 +16,10 @@ What *does* work is modulating the per-turn thinking budget via Claude Code's do
 4. Claude reads that hint as additional context for the current turn only and adjusts its thinking accordingly.
 5. Each decision is appended to `$env:USERPROFILE\.claude\hooks\routing-log.jsonl` (one log across all your projects) so you can tune the keyword sets later.
 
+### Mechanical-skill override
+
+Some prompts invoke skills whose effort is intrinsically tiny no matter how they're phrased — service lifecycle (`start`/`stop`/`restart`/`status`), `end-session`, `restart-claude`. Generic scoring signals (e.g. a leading "lets") were over-serving these. [hooks/skill-effort.psd1](hooks/skill-effort.psd1) is an **override-DOWN allowlist**: when one of a skill's distinctive phrases leads the prompt *and* the prompt carries no competing work signal (no strong/medium keyword, no numeric pick, not a question-back or negation), the tier is capped to the listed value (`none`). It never escalates, so a bundled `lets do 2 and then end session` keeps its real-work score. Each override is tagged in the routing log (`mechanical=<skill>`) so the weekly analyzer can audit it. Tiers are seeded empirically by [scripts/harvest-skill-effort.ps1](scripts/harvest-skill-effort.ps1), which mines transcripts for phrase→invocation→output-token evidence.
+
 ### Tier mapping
 
 | Score | Tier         | Effect                                                                  |
@@ -31,10 +35,12 @@ For the full keyword lists, score inputs, and the rationale for these specific t
 
 ```
 hooks/
-└── route-hint.ps1          # Scoring + hint-emitting script (UserPromptSubmit hook)
+├── route-hint.ps1          # Scoring + hint-emitting script (UserPromptSubmit hook)
+└── skill-effort.psd1       # Override-DOWN allowlist: mechanical skills -> low tier (deploy alongside the hook)
 
 scripts/
 ├── analyze-routing.ps1     # Join routing-log.jsonl with session transcripts; flag mis-routings
+├── harvest-skill-effort.ps1 # Mine transcripts for phrase->invocation->output evidence (seeds skill-effort.psd1)
 └── run-analyzer.ps1        # Wrapper that writes analyzer output to a dated log file
 
 docs/
@@ -51,9 +57,11 @@ The hook is meant to fire in **every Claude Code session**, not just sessions op
 git clone https://github.com/Qcko/claude-code-effort-router.git
 cd claude-code-effort-router
 
-# 1. Copy the script to your user-global Claude folder so it survives repo moves.
+# 1. Copy the script (and its override table) to your user-global Claude folder
+#    so they survive repo moves. skill-effort.psd1 must sit beside the hook.
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\hooks" | Out-Null
-Copy-Item hooks\route-hint.ps1 "$env:USERPROFILE\.claude\hooks\route-hint.ps1" -Force
+Copy-Item hooks\route-hint.ps1    "$env:USERPROFILE\.claude\hooks\route-hint.ps1"    -Force
+Copy-Item hooks\skill-effort.psd1 "$env:USERPROFILE\.claude\hooks\skill-effort.psd1" -Force
 
 # 2. Wire it into your user-global settings.
 #    If $env:USERPROFILE\.claude\settings.json already exists, merge the "hooks"
@@ -88,7 +96,7 @@ Get-Content "$env:USERPROFILE\.claude\hooks\routing-log.jsonl" -Tail 1
 
 ### Updating after a repo change
 
-The user-global copy at `$env:USERPROFILE\.claude\hooks\route-hint.ps1` is the live one. After pulling new keyword tweaks from this repo, re-run the `Copy-Item` step to deploy them.
+The user-global copies at `$env:USERPROFILE\.claude\hooks\route-hint.ps1` and `skill-effort.psd1` are the live ones. After pulling new keyword tweaks or override-table rows from this repo, re-run both `Copy-Item` steps to deploy them.
 
 ## Tuning
 

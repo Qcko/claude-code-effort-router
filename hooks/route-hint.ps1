@@ -69,8 +69,10 @@ $lower = $promptText.ToLowerInvariant()
 $score = 0
 $suggestSubagent = $false
 $strongFired = $false
+$strongKeywordFired = $false
 $executeFired = $false
 $affirmativeFired = $false
+$mediumFired = $false
 
 $strong = @(
     'architecture', 'redesign', 'refactor', 'debug ', 'investigate', 'root cause',
@@ -101,9 +103,9 @@ $execute = @(
     'go ahead and do it', 'apply the plan', 'apply the changes'
 )
 
-foreach ($kw in $strong)   { if ($lower.Contains($kw)) { $score += 3; $strongFired = $true } }
+foreach ($kw in $strong)   { if ($lower.Contains($kw)) { $score += 3; $strongFired = $true; $strongKeywordFired = $true } }
 foreach ($kw in $subagent) { if ($lower.Contains($kw)) { $score += 2; $suggestSubagent = $true } }
-foreach ($kw in $medium)   { if ($lower.Contains($kw)) { $score += 1 } }
+foreach ($kw in $medium)   { if ($lower.Contains($kw)) { $score += 1; $mediumFired = $true } }
 foreach ($kw in $execute)  { if ($lower.Contains($kw)) { $score += 3; $executeFired = $true; $strongFired = $true } }
 
 # Short affirmative answering a question the model just asked. "yes lets do
@@ -218,6 +220,49 @@ if     ($score -ge 7) { $tier = 'ultrathink' }
 elseif ($score -ge 4) { $tier = 'think hard' }
 elseif ($score -ge 1) { $tier = 'think' }
 
+# Mechanical-skill override (override-DOWN only). Lifecycle/session skills
+# (start/stop/restart/status of local services, end-session, restart-claude)
+# have intrinsically low effort regardless of phrasing — the 2026-06-15 harvest
+# (scripts/harvest-skill-effort.ps1) showed end-session at median 264 output
+# over 113 calls and every comfyui/ollama/glados lifecycle skill <2k median,
+# yet several were routing to think/think-hard off the "lets" scoping bonus.
+# The table lives in skill-effort.psd1 (deploy it alongside this hook). Fires
+# only when the directive dominates (matched phrase within the first 60 chars)
+# and the prompt carries no competing work signal — no strong/subagent/medium
+# keyword, no numeric pick, not a question-back or negation — so a bundled
+# "lets do 2 and then end session" or "stop glados then refactor auth" keeps
+# its real-work score. Tagged in the log (mechanical=<skill>) so the weekly
+# pass can audit the none-routed overrides the output heuristic can't see.
+$mechanicalSkill = $null
+$promptTrim = $promptText.Trim()
+$pickPresent = $promptText -imatch '\b(do|option|opt|number|no\.?|slice|step|pick|choice)\s*#?\s*[1-9]\b'
+$overrideGateClear = (-not $strongKeywordFired) -and (-not $suggestSubagent) -and (-not $mediumFired) `
+    -and (-not $pickPresent) -and (-not $promptTrim.EndsWith('?')) `
+    -and ($promptTrim -inotmatch '^\s*(no|nah|nope|dont|don''t|do not|not)\b')
+if ($overrideGateClear) {
+    $skillTablePath = Join-Path $PSScriptRoot 'skill-effort.psd1'
+    if (Test-Path -LiteralPath $skillTablePath) {
+        try {
+            $skillTable = Import-PowerShellDataFile -LiteralPath $skillTablePath
+            $tierRank = @{ 'none' = 0; 'think' = 1; 'think hard' = 2; 'ultrathink' = 3 }
+            foreach ($name in $skillTable.Keys) {
+                $entry = $skillTable[$name]
+                foreach ($phrase in $entry.phrases) {
+                    $idx = $lower.IndexOf([string]$phrase)
+                    if ($idx -ge 0 -and $idx -le 60) {
+                        if ($tierRank[$entry.tier] -lt $tierRank[$tier]) {
+                            $tier = $entry.tier
+                            $mechanicalSkill = $name
+                        }
+                        break
+                    }
+                }
+                if ($mechanicalSkill) { break }
+            }
+        } catch { }
+    }
+}
+
 # Gated intent classification: only at think hard / ultrathink. Cheap path
 # (none/think) stays token-free. Priority order is most-specific first, so a
 # "refactor and explain..." prompt is tagged refactor, not explain. Each box
@@ -299,6 +344,7 @@ try {
         project                = $project
         score                  = $score
         tier                   = $tier
+        mechanical             = $mechanicalSkill
         intent                 = $intent
         promptLen              = $len
         fileRefs               = $fileRefs
