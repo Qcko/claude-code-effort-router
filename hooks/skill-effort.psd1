@@ -41,4 +41,6 @@
   'glados-stop'     = @{ tier = 'none'; phrases = @('stop glados', 'glados-stop', 'tear down glados', 'kill glados', 'shut down glados') }
   'glados-start'    = @{ tier = 'none'; phrases = @('start glados', 'glados-start', 'launch glados', 'bring glados up') }
   'glados-restart'  = @{ tier = 'none'; phrases = @('restart glados', 'glados-restart', 'reload glados', 'bounce glados') }
+
+  'acc-swap'        = @{ tier = 'none'; phrases = @('/acc-swap', 'acc-swap', 'swap account', 'switch account', 'swap to primary', 'swap to reserve') }
 }
