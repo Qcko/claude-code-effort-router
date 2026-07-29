@@ -3,7 +3,7 @@
   Analyze routing-log.jsonl against session transcripts to flag likely mis-routings.
 
 .DESCRIPTION
-  Heuristics only — no LLM calls. Joins each routing decision with the
+  Heuristics only -- no LLM calls. Joins each routing decision with the
   assistant response that followed (from Claude Code's session jsonl files)
   and flags entries where the assigned budget probably didn't match the work:
 

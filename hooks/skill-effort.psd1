@@ -1,5 +1,5 @@
 <#
-  skill-effort.psd1 — mechanical-skill effort overrides for route-hint.ps1.
+  skill-effort.psd1 -- mechanical-skill effort overrides for route-hint.ps1.
 
   Each entry maps a skill to a thinking tier and the distinctive phrases that
   signal it. route-hint.ps1 applies these as an OVERRIDE-DOWN only: when one of
@@ -10,8 +10,8 @@
 
   Tiers are seeded empirically from scripts/harvest-skill-effort.ps1
   (2026-06-15 harvest, 30d): each skill below ran with low and low-variance
-  output — end-session median 264 over 113 calls, the comfyui/ollama/glados
-  lifecycle skills all <2k median — so 'none' is the right floor. The harvest's
+  output -- end-session median 264 over 113 calls, the comfyui/ollama/glados
+  lifecycle skills all <2k median -- so 'none' is the right floor. The harvest's
   occasional high tails (tear-down-then-do-more bundles) are filtered by the
   hook's guards, not by tier.
 

@@ -29,21 +29,21 @@ try {
 $promptText = [string]$payload.prompt
 if ([string]::IsNullOrWhiteSpace($promptText)) { exit 0 }
 
-# Skip internal tool-result echoes — they aren't user prompts and shouldn't
+# Skip internal tool-result echoes -- they aren't user prompts and shouldn't
 # consume a routing decision or pollute the log.
 if ($promptText.TrimStart().StartsWith('<task-notification>')) { exit 0 }
 
 # Peek at the prior assistant turn from the session transcript. The hook
 # payload's transcript_path points at the jsonl. A short user prompt like
 # "yes lets do that" carries no signal alone, but if the model just asked a
-# question the answer commits to whatever was proposed — usually real work.
+# question the answer commits to whatever was proposed -- usually real work.
 # Read tail-only so this stays cheap on long sessions.
 $priorTail = $null
 $priorEndedWithQuestion = $false
 $transcriptPath = [string]$payload.transcript_path
 if ($transcriptPath -and (Test-Path -LiteralPath $transcriptPath)) {
     try {
-        # @() forces array context — single-line files otherwise come back as a
+        # @() forces array context -- single-line files otherwise come back as a
         # bare [string], and $tail[$i] then indexes characters instead of lines.
         $tail = @(Get-Content -LiteralPath $transcriptPath -Tail 50 -Encoding utf8 -ErrorAction Stop)
         for ($i = $tail.Count - 1; $i -ge 0; $i--) {
@@ -95,7 +95,7 @@ $subagent = @(
     'review every', 'every file', 'all files', 'all references',
     'search the codebase', 'across the project'
 )
-# Trigger phrases — explicit user signals to execute a previously discussed plan.
+# Trigger phrases -- explicit user signals to execute a previously discussed plan.
 # Designed to be deliberate, not accidental. Score boost is enough to clear
 # think hard even on a very short prompt; length-penalty is skipped for them.
 $execute = @(
@@ -119,7 +119,7 @@ foreach ($kw in $execute)  { if ($lower.Contains($kw)) { $score += 3; $executeFi
 #     ("1", "do 1", "lets do 1", "yeah lets do 1+3", "lets go with option 2",
 #      "go with your rec")
 # Analyzer (2026-06-01 weekly) showed the prior $-anchored patterns missed any
-# reply with a restatement tail or a lets/yeah-lets prefix — the dominant
+# reply with a restatement tail or a lets/yeah-lets prefix -- the dominant
 # real-world reply shape. Guarded so a question-back ("how can I do 1?") or a
 # negation ("nah I am already at 4") never fires. Same weight as execute phrases.
 if (-not $executeFired -and $priorEndedWithQuestion) {
@@ -148,7 +148,7 @@ if (-not $executeFired -and $priorEndedWithQuestion) {
 
 # priorTail weighting: a committal pick scores a clean +3 -> think, one point
 # under the think-hard boundary. But when the prior turn was a ranked list or
-# multi-option planning turn, the pick commits to large work — the 2026-06-08
+# multi-option planning turn, the pick commits to large work -- the 2026-06-08
 # weekly pass showed these committal picks ("lets do 1", "lets go with v3 slice
 # 3b", "yeah lets do the cleanup") routinely drove 30k-215k-token runs while
 # sitting at think/3. +1 here pushes them over the boundary, but only when
@@ -201,7 +201,7 @@ if (-not $strongFired -and -not $suggestSubagent) {
     foreach ($kw in $trivial) { if ($lower.Contains($kw)) { $score -= 2 } }
 }
 
-# Length signal — long prompts usually carry more context/intent. Trigger
+# Length signal -- long prompts usually carry more context/intent. Trigger
 # phrases are short by design, so the short-prompt penalty is skipped for them.
 $len = $promptText.Length
 if     ($len -ge 1500)                          { $score += 3 }
@@ -222,14 +222,14 @@ elseif ($score -ge 1) { $tier = 'think' }
 
 # Mechanical-skill override (override-DOWN only). Lifecycle/session skills
 # (start/stop/restart/status of local services, end-session, restart-claude)
-# have intrinsically low effort regardless of phrasing — the 2026-06-15 harvest
+# have intrinsically low effort regardless of phrasing -- the 2026-06-15 harvest
 # (scripts/harvest-skill-effort.ps1) showed end-session at median 264 output
 # over 113 calls and every comfyui/ollama/glados lifecycle skill <2k median,
 # yet several were routing to think/think-hard off the "lets" scoping bonus.
 # The table lives in skill-effort.psd1 (deploy it alongside this hook). Fires
 # only when the directive dominates (matched phrase within the first 60 chars)
-# and the prompt carries no competing work signal — no strong/subagent/medium
-# keyword, no numeric pick, not a question-back or negation — so a bundled
+# and the prompt carries no competing work signal -- no strong/subagent/medium
+# keyword, no numeric pick, not a question-back or negation -- so a bundled
 # "lets do 2 and then end session" or "stop glados then refactor auth" keeps
 # its real-work score. Tagged in the log (mechanical=<skill>) so the weekly
 # pass can audit the none-routed overrides the output heuristic can't see.
@@ -266,45 +266,45 @@ if ($overrideGateClear) {
 # Gated intent classification: only at think hard / ultrathink. Cheap path
 # (none/think) stays token-free. Priority order is most-specific first, so a
 # "refactor and explain..." prompt is tagged refactor, not explain. Each box
-# is per-tier eligible — add new boxes here when the routing log shows misses.
+# is per-tier eligible -- add new boxes here when the routing log shows misses.
 $intent = $null
 
 if ($tier -eq 'think hard' -or $tier -eq 'ultrathink') {
-    # 1. execute — explicit user signal to follow through on a discussed plan
+    # 1. execute -- explicit user signal to follow through on a discussed plan
     if ($executeFired) { $intent = 'execute' }
 
-    # 2. audit — research-heavy work, both tiers
+    # 2. audit -- research-heavy work, both tiers
     if (-not $intent -and $suggestSubagent) { $intent = 'audit' }
 
-    # 3. refactor — both tiers
+    # 3. refactor -- both tiers
     if (-not $intent) {
         foreach ($kw in @('refactor', 'restructure', 'extract ', 'split into')) {
             if ($lower.Contains($kw)) { $intent = 'refactor'; break }
         }
     }
 
-    # 3. architecture — ultrathink only (broad redesign work)
+    # 3. architecture -- ultrathink only (broad redesign work)
     if (-not $intent -and $tier -eq 'ultrathink') {
         foreach ($kw in @('architecture', 'redesign', 'design ', 'strategy')) {
             if ($lower.Contains($kw)) { $intent = 'architecture'; break }
         }
     }
 
-    # 4. debug — both tiers
+    # 4. debug -- both tiers
     if (-not $intent) {
         foreach ($kw in @('why does', 'why is', 'root cause', 'fails', 'failing', 'broken', 'debug ')) {
             if ($lower.Contains($kw)) { $intent = 'debug'; break }
         }
     }
 
-    # 5. implement — both tiers
+    # 5. implement -- both tiers
     if (-not $intent) {
         foreach ($kw in @('implement', 'build ', 'create ', 'add ', 'write ', 'generate')) {
             if ($lower.Contains($kw)) { $intent = 'implement'; break }
         }
     }
 
-    # 6. explain — both tiers (most generic, last)
+    # 6. explain -- both tiers (most generic, last)
     if (-not $intent) {
         foreach ($kw in @('explain', 'how does', 'what does')) {
             if ($lower.Contains($kw)) { $intent = 'explain'; break }
@@ -318,7 +318,7 @@ $intentHints = @{
     'implement'    = '[implement] Prefer editing existing files over creating new ones. Match surrounding style. Add minimal abstractions.'
     'explain'      = '[explain] Direct answer first, then evidence with file:line citations. Skip preamble.'
     'audit'        = '[audit] Read full files, not snippets. Group findings by severity with file:line citations. Don''t stop at obvious matches. If the work is separable, prefer spawning a Task subagent (with "ultrathink") over handling everything in this turn.'
-    'refactor'     = '[refactor] Preserve observable behavior. Show the full refactored code (or a complete diff) so it can be applied directly — don''t just describe the splits. Note trade-offs per change. Avoid introducing abstractions beyond what was asked.'
+    'refactor'     = '[refactor] Preserve observable behavior. Show the full refactored code (or a complete diff) so it can be applied directly -- don''t just describe the splits. Note trade-offs per change. Avoid introducing abstractions beyond what was asked.'
     'architecture' = '[architecture] Sketch alternatives before committing to one. Name trade-offs explicitly.'
 }
 
