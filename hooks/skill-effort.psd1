@@ -43,4 +43,14 @@
   'glados-restart'  = @{ tier = 'none'; phrases = @('restart glados', 'glados-restart', 'reload glados', 'bounce glados') }
 
   'acc-swap'        = @{ tier = 'none'; phrases = @('/acc-swap', 'acc-swap', 'swap account', 'switch account', 'swap to primary', 'swap to reserve') }
+
+  # PROVISIONAL (added 2026-08-11 alongside the skill; no harvest data yet).
+  # Commit + fast-forward main + push, mid-session. Mechanical: whatever thinking
+  # it needs goes into the commit message, and that message is about work already
+  # reasoned about upstream. It is 'end-session' (median 264 over 113 calls) minus
+  # the SESSION.md write, so 'none' is if anything generous. Phrases are kept
+  # tight - 'cffp' is distinctive, and the spelled-out forms lead a prompt only
+  # when they ARE the whole request; 'commit this and then <more work>' is caught
+  # by the hook's competing-work guard rather than by leaving the phrase out.
+  'cffp'            = @{ tier = 'none'; phrases = @('cffp', '/cffp', 'commit ff push', 'commit fast-forward push', 'commit and push to main') }
 }
