@@ -53,4 +53,15 @@
   # when they ARE the whole request; 'commit this and then <more work>' is caught
   # by the hook's competing-work guard rather than by leaving the phrase out.
   'cffp'            = @{ tier = 'none'; phrases = @('cffp', '/cffp', 'commit ff push', 'commit fast-forward push', 'commit and push to main') }
+
+  # PROVISIONAL (added 2026-08-14 alongside the skill; no harvest data yet).
+  # Wind down in-flight work and yield. Mechanical by construction: the skill
+  # forbids new work, and its whole output is a short done/in-flight/next report.
+  # Strictly less than 'end-session' (median 264), which also commits, pushes and
+  # writes SESSION.md, so 'none'.
+  # Bare 'stop' is deliberately EXCLUDED - it leads 'stop ollama', 'stop comfy'
+  # and 'stop glados' (own rows above) and plenty of real-work prompts. Every
+  # phrase here is either punctuated ('/stop') or qualified ('soft stop', 'stop
+  # cleanly'), so it cannot swallow a lifecycle skill's prompt.
+  'soft-stop'       = @{ tier = 'none'; phrases = @('/stop', 'soft stop', 'soft-stop', 'stop cleanly', 'wind down', 'wait a bit', 'hold on') }
 }
