@@ -36,6 +36,7 @@ if ([string]::IsNullOrWhiteSpace($promptText)) { exit 0 }
 # Skip internal tool-result echoes -- they aren't user prompts and shouldn't
 # consume a routing decision or pollute the log.
 if ($promptText.TrimStart().StartsWith('<task-notification>')) { exit 0 }
+if ($promptText.TrimStart().StartsWith('<agent-message ')) { exit 0 }
 
 # Peek at the prior assistant turn from the session transcript. The hook
 # payload's transcript_path points at the jsonl. A short user prompt like
@@ -219,6 +220,27 @@ $fileRefs = ([regex]::Matches($promptText, '@[\w./\\-]+|\b[\w-]+\.[a-zA-Z][a-zA-
 if     ($fileRefs -ge 3) { $score += 2 }
 elseif ($fileRefs -ge 1) { $score += 1 }
 
+# Multi-work floor: a work verb plus a sequencing or plural marker ("fix X
+# first, then Y", "lets fix both", "lets do 1 and then 2", "sort out all of
+# them") queues several pieces of work in one short prompt. The 2026-09-26
+# replay (60 days, timestamp-joined) found 47 such prompts scoring -2..3 with
+# median output 20-29k, against 4.9k/7.2k for none/think overall. The short
+# prompt is what hides the scale, so this floors at think hard rather than
+# adding points. Question-backs ("do you need all 12?") are excluded. Counted
+# items only count when they are work items ("the 2 bugs", not "the 3 typos").
+$multiWorkVerbs = 'fix|add|design|implement|build|update|sort out|do|handle|tackle|address|clean up|refactor|wire|finish'
+$multiWorkVerb = "\b($multiWorkVerbs)\b"
+$multiWorkMarker = '(\bboth\b|\ball (of )?(them|these|those|\d+)\b' +
+    '|\bthe (\d+|two|three|four|other) (bugs|issues|threads|findings|tasks|fixes|problems|items)\b' +
+    '|\bfirst\b.{0,40}\bthen\b|\band then\b|,\s*then\b' +
+    "|\bthen ($multiWorkVerbs|the)\b)"
+$rawScore = $score
+$multiWorkFired = $false
+if (-not $promptText.Trim().EndsWith('?') -and $promptText -imatch $multiWorkVerb -and $promptText -imatch $multiWorkMarker) {
+    $multiWorkFired = $true
+    if ($score -lt 4) { $score = 4 }
+}
+
 $tier = 'none'
 if     ($score -ge 7) { $tier = 'ultrathink' }
 elseif ($score -ge 4) { $tier = 'think hard' }
@@ -241,7 +263,7 @@ $mechanicalSkill = $null
 $promptTrim = $promptText.Trim()
 $pickPresent = $promptText -imatch '\b(do|option|opt|number|no\.?|slice|step|pick|choice)\s*#?\s*[1-9]\b'
 $overrideGateClear = (-not $strongKeywordFired) -and (-not $suggestSubagent) -and (-not $mediumFired) `
-    -and (-not $pickPresent) -and (-not $promptTrim.EndsWith('?')) `
+    -and (-not $pickPresent) -and (-not $multiWorkFired) -and (-not $promptTrim.EndsWith('?')) `
     -and ($promptTrim -inotmatch '^\s*(no|nah|nope|dont|don''t|do not|not)\b')
 if ($overrideGateClear) {
     $skillTablePath = Join-Path $PSScriptRoot 'skill-effort.psd1'
@@ -349,6 +371,8 @@ try {
         score                  = $score
         tier                   = $tier
         mechanical             = $mechanicalSkill
+        multiWork              = $multiWorkFired
+        rawScore               = $rawScore
         intent                 = $intent
         promptLen              = $len
         fileRefs               = $fileRefs
