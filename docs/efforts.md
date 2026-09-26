@@ -1,17 +1,19 @@
 # Effort Tiers
 
-This hook escalates Claude's per-turn **thinking budget** by injecting one of Claude Code's documented trigger words into the additional context for the current turn. Lower tiers use less reasoning; higher tiers use more. The driver model is unchanged — only effort moves.
+This hook scores each prompt and maps the score to one of four **tiers**. Since emit version 2 (26-09-2026) a tier decides which **depth guidance** the hook appends to the turn as plain text. It does not set a thinking budget, and it does not change the effort level. Current Claude models think adaptively, effort (`low` to `max`, set by the user) is the only real depth control, and Claude Code recognises only a user-typed `ultrathink` as a keyword. See [../DESIGN.md](../DESIGN.md) for the flow and the evidence.
 
 ## The four tiers
 
-| Tier         | Trigger word in context | Behavior                                                                                                                                                                                                |
-|--------------|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| (none)       | *(nothing emitted)*     | Default for the driver model. Minimal/no extended thinking. Used when the prompt scores as trivial.                                                                                                     |
-| `think`      | `think`                 | Light thinking budget. The model takes a brief reasoning pass before responding. Suitable for prompts that imply a single coding action with one or two file references.                                |
-| `think hard` | `think hard`            | Larger budget. The model reasons through trade-offs before acting. Suitable when the prompt names multiple concerns or moderate scope.                                                                  |
-| `ultrathink` | `ultrathink`            | Maximum budget. The model reasons deeply before acting. Used for architecture, debugging, multi-file refactors, and any prompt scored as "complex." Optionally paired with a Task subagent suggestion. |
+The tier names are internal labels kept for continuity with the routing log. None of them is emitted as a keyword.
 
-The trigger words above are the documented Claude Code keywords. They are recognized when present in the model's input for a given turn and increase the thinking-budget cap accordingly. They reset every turn — there is no global "ultrathink mode."
+| Tier         | Emitted text (v2)                  | Used for |
+|--------------|------------------------------------|----------|
+| (none)       | *(nothing)*                        | Trivial prompts. |
+| `think`      | status line only                   | A single coding action with one or two file references. A depth line is withheld until the v2 data shows it is worth the output it would add on the most frequent tier. |
+| `think hard` | `[auto-router: high depth] ...`    | Multiple concerns or moderate scope, and multi-work prompts ("fix X first, then Y"). |
+| `ultrathink` | `[auto-router: maximum depth] ...` | Architecture, debugging, multi-file refactors, and anything scored as complex. Optionally paired with a Task subagent suggestion. |
+
+The exact texts live in one table, `$depthLines`, in [hooks/route-hint.ps1](../hooks/route-hint.ps1). Each asks for reasoning before acting, verification only when code or files changed, and depth in reasoning rather than in reply length. Each also tells the model to proceed directly if the task proves simpler than it looked. When the session effort (`CLAUDE_EFFORT`) is `high`, `xhigh`, `max` or `ultracode`, no depth line is emitted. Guidance resets every turn.
 
 ## How the hook chooses a tier
 
@@ -35,14 +37,10 @@ Score inputs (all heuristic; tunable in the script):
 
 Detected file refs are `@mention` patterns and dotted filenames (`foo.ts`, `Bar.cs`).
 
-## Why these tiers and not "low / medium / high effort"?
+## Why tiers, and not the effort levels themselves?
 
-Claude Code already exposes effort control through these specific trigger words. The hook stays as close as possible to that documented surface so that:
-
-- Behavior is predictable (the trigger words have defined semantics, not implementation-defined ones).
-- Updates to Claude Code's effort handling automatically benefit this hook with no code changes.
-- The user can manually type `ultrathink` to force the highest tier and get the same effect the hook would.
+The tiers were first built as a mapping onto Claude Code's thinking trigger words, which once set a thinking budget. That mechanism is gone, and a hook cannot set the effort level, so the router cannot choose `low`/`medium`/`high` for a turn. Changing effort mid-session would also cost a prompt-cache rebuild. Text appended to the newest turn is the only lever a hook has, and it is cache-safe. The tiers stay because the scoring and 4+ months of routing-log history are keyed on them.
 
 ## Combining with subagents
 
-For prompts that score `ultrathink` *and* match a subagent-hint keyword (research-heavy, codebase-wide audit, etc.), the hook adds a routing note suggesting Claude spawn a Task subagent with `ultrathink` in its prompt. Subagents run in isolated context, which keeps the driver session focused while letting genuinely separable deep work happen in parallel. Subagents are about *isolation*, not effort — pair them with `ultrathink` when you need both.
+For prompts that score `ultrathink` *and* match a subagent-hint keyword (research-heavy, codebase-wide audit, etc.), the `[audit]` hint suggests Claude spawn a Task subagent, told explicitly to reason thoroughly. Subagents run in isolated context, which keeps the driver session focused while letting genuinely separable deep work happen in parallel. Subagents are about *isolation*, not depth.

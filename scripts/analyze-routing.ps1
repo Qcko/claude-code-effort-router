@@ -5,11 +5,18 @@
 .DESCRIPTION
   Heuristics only -- no LLM calls. Joins each routing decision with the
   assistant response that followed (from Claude Code's session jsonl files)
-  and flags entries where the assigned budget probably didn't match the work:
+  and flags entries where the assigned tier probably didn't match the work:
 
-    tier=think       and output >= 5000  -> under-served (model wanted to reason more)
+    tier=think       and output >= 5000  -> under-served (work was bigger than the tier)
     tier=think hard  and output >= 15000 -> probably under-served
-    tier=ultrathink  and output <= 500   -> over-served (budget wasted)
+    tier=ultrathink  and output <= 500   -> over-served (small work, top tier)
+
+  Tiers are the hook's internal depth labels, not Claude Code keywords: the
+  hook emits steering text per tier (emitVersion 2, from 2026-09-26) and the
+  session effort sets actual depth. Output after emitVersion 2 is not
+  comparable with the keyword era, so the per-tier summary is split by
+  emitVersion and sessionEffort. The thresholds above date from the keyword
+  era and are provisional under v2.
 
   Surfaces candidates for keyword/box tuning. Does not modify the hook.
 
@@ -134,6 +141,23 @@ function Find-Turn {
   return $best
 }
 
+# Output per turn is heavy-tailed -- one long agentic run dominates a mean --
+# so the median is the comparison figure and the mean is kept for context.
+function Get-OutputSummary {
+  param($Group)
+  $first = $Group.Group[0]
+  $outputs = @($Group.Group | ForEach-Object { [int]$_.output_tokens } | Sort-Object)
+  [pscustomobject]@{
+    Emit         = "v$($first.emitVersion)"
+    Effort       = $first.sessionEffort
+    Tier         = $first.tier
+    Count        = $outputs.Count
+    MedianOutput = $outputs[[int][Math]::Floor($outputs.Count / 2)]
+    AvgOutput    = [int](($outputs | Measure-Object -Average).Average)
+    MaxOutput    = $outputs[-1]
+  }
+}
+
 function Flag-Row {
   param([string]$Tier, [int]$Output)
   if     ($Tier -eq 'think'      -and $Output -ge 5000)  { 'under-served' }
@@ -162,6 +186,9 @@ $rows = foreach ($d in $decisions) {
     output_tokens = $output
     flag          = $flag
     preview       = $d.preview
+    emitVersion   = if ($d.emitVersion) { [int]$d.emitVersion } else { 1 }
+    sessionEffort = if ($d.sessionEffort) { $d.sessionEffort } else { 'unknown' }
+    emitted       = $d.emitted
   }
 }
 
@@ -205,14 +232,8 @@ $rows | Group-Object tier | Select-Object Name, Count | Sort-Object Name | Forma
 Write-Host '=== Counts by intent ===' -ForegroundColor Cyan
 $rows | Where-Object intent | Group-Object intent | Select-Object Name, Count | Sort-Object Name | Format-Table -AutoSize | Out-String | Write-Host
 
-Write-Host '=== Average output tokens by tier ===' -ForegroundColor Cyan
+Write-Host '=== Output tokens by emit version, session effort and tier ===' -ForegroundColor Cyan
 $rows | Where-Object { $_.output_tokens -ne $null } |
-  Group-Object tier |
-  ForEach-Object {
-    [pscustomobject]@{
-      Tier  = $_.Name
-      Count = $_.Count
-      AvgOutput = [int](($_.Group | Measure-Object output_tokens -Average).Average)
-      MaxOutput = ($_.Group | Measure-Object output_tokens -Maximum).Maximum
-    }
-  } | Sort-Object Tier | Format-Table -AutoSize | Out-String | Write-Host
+  Group-Object emitVersion, sessionEffort, tier |
+  ForEach-Object { Get-OutputSummary -Group $_ } |
+  Sort-Object Emit, Effort, Tier | Format-Table -AutoSize | Out-String | Write-Host

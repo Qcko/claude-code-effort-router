@@ -1,7 +1,7 @@
 <#
   skill-effort.psd1 -- mechanical-skill effort overrides for route-hint.ps1.
 
-  Each entry maps a skill to a thinking tier and the distinctive phrases that
+  Each entry maps a skill to a routing tier and the distinctive phrases that
   signal it. route-hint.ps1 applies these as an OVERRIDE-DOWN only: when one of
   the phrases leads the prompt (within the first ~60 chars) and the prompt
   carries no competing work signal, the tier is capped to the listed value.

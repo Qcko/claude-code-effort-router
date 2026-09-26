@@ -343,18 +343,41 @@ $intentHints = @{
     'debug'        = '[debug] Frame as root-cause analysis. Reproduce the failure mentally before proposing a fix. Cite the line that breaks the invariant.'
     'implement'    = '[implement] Prefer editing existing files over creating new ones. Match surrounding style. Add minimal abstractions.'
     'explain'      = '[explain] Direct answer first, then evidence with file:line citations. Skip preamble.'
-    'audit'        = '[audit] Read full files, not snippets. Group findings by severity with file:line citations. Don''t stop at obvious matches. If the work is separable, prefer spawning a Task subagent (with "ultrathink") over handling everything in this turn.'
+    'audit'        = '[audit] Read full files, not snippets. Group findings by severity with file:line citations. Don''t stop at obvious matches. If the work is separable, prefer spawning a Task subagent (told explicitly to reason thoroughly) over handling everything in this turn.'
     'refactor'     = '[refactor] Preserve observable behavior. Show the full refactored code (or a complete diff) so it can be applied directly -- don''t just describe the splits. Note trade-offs per change. Avoid introducing abstractions beyond what was asked.'
     'architecture' = '[architecture] Sketch alternatives before committing to one. Name trade-offs explicitly.'
 }
 
+# Only 'ultrathink' is a Claude Code keyword, and only when the user types it:
+# hook output is plain context text, so each tier emits an explicit steering
+# line instead of a bare keyword (verified 2026-09-26, Claude Code 2.1.281).
+# Effort, not text, sets depth; the line nudges within the session's effort.
+# 'think' deliberately emits nothing until the v2 data shows it is worth it.
+function Get-DepthLine {
+    param([string]$Tier, [string]$SessionEffort, [hashtable]$Lines)
+    if (@('high', 'xhigh', 'max', 'ultracode') -contains $SessionEffort) { return $null }
+    return $Lines[$Tier]
+}
+
+$emitVersion = 2
+$depthLines = @{
+    'think hard' = '[auto-router: high depth] Think this through before acting: consider alternatives, trade-offs and edge cases. If you change code or files, verify the result (test, script or re-read) before calling it done. Keep the reply concise.'
+    'ultrathink' = '[auto-router: maximum depth] This turn warrants careful, thorough reasoning before acting: compare approaches before committing, and consider failure modes. If you change code or files, verify before calling it done. Put the depth into reasoning, not reply length; if it proves simpler than it looked, proceed directly.'
+}
+$sessionEffort = ([string]$env:CLAUDE_EFFORT).Trim()
+$depthLine = Get-DepthLine -Tier $tier -SessionEffort $sessionEffort -Lines $depthLines
+$emitted = [bool]$depthLine
+
 if ($tier -ne 'none') {
-    Write-Output "[auto-router] complexity score $score -> applying thinking budget: $tier"
-    Write-Output ""
-    Write-Output $tier
+    Write-Output "[auto-router] score $score -> tier=$tier"
+    if ($depthLine) {
+        Write-Output ""
+        Write-Output $depthLine
+    }
     if ($intent) {
         Write-Output ""
         Write-Output $intentHints[$intent]
+        $emitted = $true
     }
 }
 
@@ -373,6 +396,9 @@ try {
         mechanical             = $mechanicalSkill
         multiWork              = $multiWorkFired
         rawScore               = $rawScore
+        emitVersion            = $emitVersion
+        emitted                = $emitted
+        sessionEffort          = $sessionEffort
         intent                 = $intent
         promptLen              = $len
         fileRefs               = $fileRefs

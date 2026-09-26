@@ -1,19 +1,21 @@
 # Claude Code Effort Router
 
-A `UserPromptSubmit` hook for [Claude Code](https://claude.com/claude-code) that auto-tunes the **thinking budget** per turn. Trivial prompts run cheap, complex ones get escalated to `think hard` or `ultrathink`, and research-heavy prompts get a nudge to spawn a Task subagent. The driver model stays the same for the whole session — only effort changes per turn.
+A `UserPromptSubmit` hook for [Claude Code](https://claude.com/claude-code) that scores every prompt and adds **reasoning-depth guidance** to the turns that need it. Trivial prompts get nothing, harder ones get an explicit instruction to think them through, and research-heavy prompts get a nudge to spawn a Task subagent. The guidance nudges depth *within* the session's effort level; it does not change the effort itself, which only you can set (`/effort`, the model picker, `--effort`).
 
 ## Background: why a hook, not an MCP server
 
 This repo started as an MCP server that tried to swap Claude Code's model based on task complexity. That approach doesn't work — an MCP tool can only return strings to Claude, not reconfigure the host. The driver model is fixed at session launch and can only be changed by `/model` or relaunching with `--model`.
 
-What *does* work is modulating the per-turn thinking budget via Claude Code's documented trigger words (`think`, `think hard`, `ultrathink`). A `UserPromptSubmit` hook can inject one of those into the additional context for the current turn, escalating effort only when the prompt warrants it. That's what this repo now is.
+The hook then injected Claude Code's thinking trigger words (`think`, `think hard`, `ultrathink`) into each turn's context. **That no longer does what it used to** (verified 26-09-2026 against Claude Code 2.1.281 and its docs). Current models think adaptively and have no thinking budget for a keyword to set. Claude Code now recognises only `ultrathink`, and only when *you* type it. `think` and `think hard` are ordinary words, and a hook-injected `ultrathink` is never detected. Effort (`low` to `max`) is the only real depth control, and a hook cannot set it.
+
+What a hook *can* do is add text to the turn. So since emit version 2 the router emits a plain instruction per tier ("think this through before acting: consider alternatives...") instead of a bare keyword. It works as ordinary steering text, cache-safe because it is appended to the newest turn.
 
 ## How it works
 
 1. You launch Claude Code with Opus as the driver: `claude --model claude-opus-4-8`.
 2. On every prompt, Claude Code runs [hooks/route-hint.ps1](hooks/route-hint.ps1).
-3. The script scores the prompt (keywords + length + file refs) and prints a short context block — empty for trivial prompts, or a thinking-trigger word + reasoning hint for harder ones.
-4. Claude reads that hint as additional context for the current turn only and adjusts its thinking accordingly.
+3. The script scores the prompt (keywords + length + file refs), maps the score to a tier, and prints a short context block: a status line, a depth instruction for the upper tiers, and an optional task-shape hint (`[refactor]`, `[debug]`, ...).
+4. Claude reads that block as ordinary context for the current turn only. It steers how carefully the model works within the session's effort level.
 5. Each decision is appended to `$env:USERPROFILE\.claude\hooks\routing-log.jsonl` (one log across all your projects) so you can tune the keyword sets later.
 
 ### Mechanical-skill override
@@ -22,12 +24,16 @@ Some prompts invoke skills whose effort is intrinsically tiny no matter how they
 
 ### Tier mapping
 
-| Score | Tier         | Effect                                                                  |
-|------:|--------------|-------------------------------------------------------------------------|
-|  < 1  | (none)       | Hook stays silent. No extra thinking budget.                            |
-|  1–3  | `think`      | Light thinking budget for the current turn.                             |
-|  4–6  | `think hard` | Larger thinking budget.                                                  |
-|  ≥ 7  | `ultrathink` | Maximum thinking budget. If the prompt is also research-heavy, the hook adds a one-line note recommending a Task subagent. |
+Tier names are internal labels kept for continuity with the routing log; none of them is emitted as a keyword.
+
+| Score | Tier         | Emitted (emit version 2)                                                 |
+|------:|--------------|--------------------------------------------------------------------------|
+|  < 1  | (none)       | Nothing.                                                                 |
+|  1-3  | `think`      | Status line only. A depth line is withheld until the v2 data shows it pays. |
+|  4-6  | `think hard` | `[auto-router: high depth]` - think it through, weigh alternatives and edge cases, verify changed code before calling it done, keep the reply concise. |
+|  >= 7 | `ultrathink` | `[auto-router: maximum depth]` - compare approaches before committing, consider failure modes, verify changed code, put the depth into reasoning rather than reply length. |
+
+When the session effort (`CLAUDE_EFFORT`) is already `high`, `xhigh`, `max` or `ultracode`, the depth line is left out: the model already reasons at that depth, and extra "think harder" text is the documented path to overthinking. Task-shape hints are still emitted. An unset effort is treated as low.
 
 For the full keyword lists, score inputs, and the rationale for these specific tiers, see [docs/efforts.md](docs/efforts.md).
 
@@ -41,10 +47,13 @@ hooks/
 scripts/
 ├── analyze-routing.ps1     # Join routing-log.jsonl with session transcripts; flag mis-routings
 ├── harvest-skill-effort.ps1 # Mine transcripts for phrase->invocation->output evidence (seeds skill-effort.psd1)
-└── run-analyzer.ps1        # Wrapper that writes analyzer output to a dated log file
+├── run-analyzer.ps1        # Wrapper that writes analyzer output to a dated log file
+└── smoke-route-hint.ps1    # End-to-end smoke test of the hook in a child PowerShell 5.1 (throwaway log)
+
+DESIGN.md                   # Design: prompt -> score -> tier -> emitted text, with the evidence
 
 docs/
-└── efforts.md              # Reference: the four effort tiers and how the hook picks one
+└── efforts.md              # Reference: the four tiers, what each emits, and how the hook picks one
 ```
 
 ## Setup
@@ -120,14 +129,15 @@ powershell -ExecutionPolicy Bypass -File scripts\analyze-routing.ps1 -Days 7
 ## Limits & caveats
 
 - **Driver model is fixed at launch.** This hook only modulates *effort* per turn. To swap models you still need `/model` or to relaunch Claude Code.
-- **Trigger words arrive as hook-injected context**, not as part of your literal user message. The hook also prints an explicit prose hint (`[auto-router] complexity score N -> applying thinking budget: ultrathink`) so Claude reasons accordingly even if the keyword detector only scans user text.
+- **Guidance, not effort.** Hook output is plain context appended to your turn. It nudges depth within the session's effort level and cannot raise that level. The status line (`[auto-router] score N -> tier=ultrathink`) is informational. If you want the real `ultrathink` keyword, type it yourself.
+- **Measuring it.** Every log entry records `emitVersion`, `emitted` and `sessionEffort`. The analyzer splits output by all three, so v2 turns are never averaged together with keyword-era (v1) turns.
 - **Subagent suggestions are nudges, not enforcement.** Claude decides whether to actually call the Task tool. In practice this is reliable when the suggestion clearly applies, but not 100%.
 - **Hook latency:** roughly 150–300 ms per prompt for PowerShell startup. Acceptable but real.
 - **Privacy:** the routing log records an 80-character preview of each prompt and the project path it fired in. The file lives in your user-global Claude folder and is never committed. Delete it any time.
 
 ## Updating for new Claude versions
 
-When a new Claude model ships, just point your driver at it: `claude --model <new-id>`. The hook is model-agnostic — it operates on Claude Code's effort trigger words, which apply to any current Claude. No config files in this repo need updating.
+When a new Claude model ships, just point your driver at it: `claude --model <new-id>`. The hook is model-agnostic: it emits plain steering text, which any model reads. When Claude Code's keyword or effort handling changes, re-check the "Background" facts above; the tier texts live in one table (`$depthLines`) in the hook.
 
 ## License
 
