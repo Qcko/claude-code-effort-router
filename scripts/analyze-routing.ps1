@@ -54,43 +54,84 @@ function Read-Decisions {
   }
 }
 
+# One turn per user prompt, stamped with the prompt's own timestamp. Repeated
+# prompts ("lets do 1") are separate turns, not one merged bucket.
 function Get-AssistantTurns {
   param([string]$Path)
-  $turns = [ordered]@{}
-  $lastPreview = $null
-  foreach ($line in Get-Content $Path) {
-    if (-not $line.Trim()) { continue }
+  $turns = New-Object System.Collections.ArrayList
+  $current = $null
+  foreach ($line in [IO.File]::ReadLines($Path)) {
+    if ($line -notmatch '"type":"(user|assistant)"') { continue }
+    if ($line.Contains('"tool_result"') -and -not $line.Contains('"type":"text"')) { continue }
     try { $d = $line | ConvertFrom-Json } catch { continue }
+    if ($d.isSidechain) { continue }
     if ($d.type -eq 'user' -and $d.message) {
-      $content = $d.message.content
-      $text = if ($content -is [string]) { $content }
-              else { ($content | Where-Object { $_.type -eq 'text' } | ForEach-Object { $_.text }) -join ' ' }
-      if ($text) {
-        $lastPreview = ($text.Substring(0, [Math]::Min(80, $text.Length))) -replace "[`r`n]+", ' '
+      $text = Get-TypedPromptText -Entry $d
+      if (-not $text) { continue }
+      $ts = [datetimeoffset]::MinValue
+      if (-not [datetimeoffset]::TryParse([string]$d.timestamp, [ref]$ts)) { continue }
+      $current = [pscustomobject]@{
+        preview       = ($text.Substring(0, [Math]::Min(80, $text.Length))) -replace "[`r`n]+", ' '
+        ts            = $ts.UtcDateTime
+        output_tokens = 0
       }
+      [void]$turns.Add($current)
     }
-    elseif ($d.type -eq 'assistant' -and $d.message -and $d.message.usage -and $lastPreview) {
-      if (-not $turns.Contains($lastPreview)) {
-        $turns[$lastPreview] = [pscustomobject]@{ preview = $lastPreview; output_tokens = 0 }
-      }
-      $turns[$lastPreview].output_tokens += [int]$d.message.usage.output_tokens
+    elseif ($d.type -eq 'assistant' -and $d.message -and $d.message.usage -and $current) {
+      $current.output_tokens += [int]$d.message.usage.output_tokens
     }
   }
-  return $turns.Values
+  return $turns
+}
+
+# Mirrors hooks/route-hint.ps1: the same reminder strip and the same skip
+# prefixes, so the transcript-side preview is cut from the text the hook
+# scored. Harness-generated user entries return $null and do not open a turn.
+function Get-TypedPromptText {
+  param($Entry)
+  if ($Entry.isMeta -or $Entry.isCompactSummary) { return $null }
+  $content = $Entry.message.content
+  $text = if ($content -is [string]) { $content }
+          else { ($content | Where-Object { $_.type -eq 'text' } | ForEach-Object { $_.text }) -join ' ' }
+  if (-not $text) { return $null }
+  $text = $text -replace '^(\s*<system-reminder>[\s\S]*?</system-reminder>)+\s*', ''
+  if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+  $head = $text.TrimStart()
+  foreach ($prefix in @('<task-notification>', '<agent-message ', '<local-command-', '<command-name>', 'Caveat:')) {
+    if ($head.StartsWith($prefix)) { return $null }
+  }
+  return $text
 }
 
 function Build-PreviewIndex {
-  param([string]$ProjectsDir)
+  param([string]$ProjectsDir, [datetime]$Cutoff)
   $index = @{}
   if (-not (Test-Path $ProjectsDir)) { return $index }
-  Get-ChildItem -Path $ProjectsDir -Recurse -Filter '*.jsonl' -ErrorAction SilentlyContinue | ForEach-Object {
-    foreach ($t in (Get-AssistantTurns -Path $_.FullName)) {
-      if ($t.preview -and -not $index.ContainsKey($t.preview)) {
-        $index[$t.preview] = $t
+  Get-ChildItem -Path $ProjectsDir -Recurse -Filter '*.jsonl' -ErrorAction SilentlyContinue |
+    Where-Object { $_.LastWriteTimeUtc -ge $Cutoff } | ForEach-Object {
+      foreach ($t in (Get-AssistantTurns -Path $_.FullName)) {
+        if (-not $index.ContainsKey($t.preview)) { $index[$t.preview] = New-Object System.Collections.ArrayList }
+        [void]$index[$t.preview].Add($t)
       }
     }
-  }
   return $index
+}
+
+# The hook logs just before the prompt lands in the transcript, so the matching
+# turn is the same-preview turn closest in time; beyond the window it is some
+# other occurrence of the same words, not this one.
+function Find-Turn {
+  param($Index, [string]$Preview, [datetime]$Ts, [int]$WindowSeconds = 120)
+  $best = $null
+  $bestGap = [double]::MaxValue
+  foreach ($t in @($Index[$Preview])) {
+    if (-not $t) { continue }
+    $gap = [Math]::Abs(($t.ts - $Ts).TotalSeconds)
+    if ($gap -lt $bestGap) { $best = $t; $bestGap = $gap }
+  }
+  if ($bestGap -gt $WindowSeconds) { return $null }
+  [void]$Index[$Preview].Remove($best)
+  return $best
 }
 
 function Flag-Row {
@@ -107,10 +148,10 @@ if ($decisions.Count -eq 0) {
   return
 }
 
-$turnIndex = Build-PreviewIndex -ProjectsDir $ProjectsDir
+$turnIndex = Build-PreviewIndex -ProjectsDir $ProjectsDir -Cutoff $cutoff
 
 $rows = foreach ($d in $decisions) {
-  $turn = $turnIndex[$d.preview]
+  $turn = Find-Turn -Index $turnIndex -Preview $d.preview -Ts $d._ts
   $output = if ($turn) { $turn.output_tokens } else { $null }
   $flag = if ($output -ne $null) { Flag-Row -Tier $d.tier -Output $output } else { $null }
   [pscustomobject]@{
