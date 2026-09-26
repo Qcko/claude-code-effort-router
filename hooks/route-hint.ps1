@@ -27,6 +27,10 @@ try {
 }
 
 $promptText = [string]$payload.prompt
+
+# Harness-injected context (e.g. the worktree notice on a session's first
+# prompt) arrives prepended to the user's words. Score only what the user typed.
+$promptText = $promptText -replace '^(\s*<system-reminder>[\s\S]*?</system-reminder>)+\s*', ''
 if ([string]::IsNullOrWhiteSpace($promptText)) { exit 0 }
 
 # Skip internal tool-result echoes -- they aren't user prompts and shouldn't
