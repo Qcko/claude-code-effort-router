@@ -12,7 +12,7 @@ What a hook *can* do is add text to the turn. So since emit version 2 the router
 
 ## How it works
 
-1. You launch Claude Code with Opus as the driver: `claude --model claude-opus-4-8`.
+1. You launch Claude Code with Opus as the driver: `claude --model opus`. The unversioned alias always resolves to the newest Opus, so this step never goes stale.
 2. On every prompt, Claude Code runs [hooks/route-hint.ps1](hooks/route-hint.ps1).
 3. The script scores the prompt (keywords + length + file refs), maps the score to a tier, and prints a short context block: a status line, a depth instruction for the upper tiers, and an optional task-shape hint (`[refactor]`, `[debug]`, ...).
 4. Claude reads that block as ordinary context for the current turn only. It steers how carefully the model works within the session's effort level.
@@ -137,7 +137,7 @@ powershell -ExecutionPolicy Bypass -File scripts\analyze-routing.ps1 -Days 7
 
 ## Updating for new Claude versions
 
-When a new Claude model ships, just point your driver at it: `claude --model <new-id>`. The hook is model-agnostic: it emits plain steering text, which any model reads. When Claude Code's keyword or effort handling changes, re-check the "Background" facts above; the tier texts live in one table (`$depthLines`) in the hook.
+When a new Claude model ships, `claude --model opus` picks it up automatically; pass a full model id only if you deliberately want to pin one. The hook is model-agnostic: it emits plain steering text, which any model reads. When Claude Code's keyword or effort handling changes, re-check the "Background" facts above; the tier texts live in one table (`$depthLines`) in the hook.
 
 ## License
 
