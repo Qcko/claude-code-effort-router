@@ -81,11 +81,13 @@ function Get-AssistantTurns {
         preview       = ($text.Substring(0, [Math]::Min(80, $text.Length))) -replace "[`r`n]+", ' '
         ts            = $ts.UtcDateTime
         output_tokens = 0
+        effort        = ''
       }
       [void]$turns.Add($current)
     }
     elseif ($d.type -eq 'assistant' -and $d.message -and $d.message.usage -and $current) {
       $current.output_tokens += [int]$d.message.usage.output_tokens
+      if (-not $current.effort -and $d.effort) { $current.effort = [string]$d.effort }
     }
   }
   return $turns
@@ -166,6 +168,16 @@ function Flag-Row {
   else { $null }
 }
 
+# Rows logged before the hook read effort from the transcript (06-10-2026)
+# carry an empty sessionEffort; the matched turn's own assistant entries
+# record the effort it actually ran at, so backfill from there.
+function Resolve-SessionEffort {
+  param($Decision, $Turn)
+  if ($Decision.sessionEffort) { return $Decision.sessionEffort }
+  if ($Turn -and $Turn.effort) { return $Turn.effort }
+  return 'unknown'
+}
+
 $decisions  = @(Read-Decisions -Path $RoutingLog -Cutoff $cutoff)
 if ($decisions.Count -eq 0) {
   Write-Host "No routing entries in the last $Days days." -ForegroundColor Yellow
@@ -187,7 +199,7 @@ $rows = foreach ($d in $decisions) {
     flag          = $flag
     preview       = $d.preview
     emitVersion   = if ($d.emitVersion) { [int]$d.emitVersion } else { 1 }
-    sessionEffort = if ($d.sessionEffort) { $d.sessionEffort } else { 'unknown' }
+    sessionEffort = Resolve-SessionEffort -Decision $d -Turn $turn
     emitted       = $d.emitted
   }
 }
