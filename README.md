@@ -33,7 +33,7 @@ Tier names are internal labels kept for continuity with the routing log; none of
 |  4-6  | `think hard` | `[auto-router: high depth]` - think it through, weigh alternatives and edge cases, verify changed code before calling it done, keep the reply concise. |
 |  >= 7 | `ultrathink` | `[auto-router: maximum depth]` - compare approaches before committing, consider failure modes, verify changed code, put the depth into reasoning rather than reply length. |
 
-When the session effort (`CLAUDE_EFFORT`) is already `high`, `xhigh`, `max` or `ultracode`, the depth line is left out: the model already reasons at that depth, and extra "think harder" text is the documented path to overthinking. Task-shape hints are still emitted. An unset effort is treated as low.
+When the session effort (read from the previous assistant turn in the transcript, since hooks on this event get no effort field or `CLAUDE_EFFORT`) is already `high`, `xhigh`, `max` or `ultracode`, the depth line is left out: the model already reasons at that depth, and extra "think harder" text is the documented path to overthinking. Task-shape hints are still emitted. An unset effort is treated as low.
 
 For the full keyword lists, score inputs, and the rationale for these specific tiers, see [docs/efforts.md](docs/efforts.md).
 
@@ -130,7 +130,7 @@ powershell -ExecutionPolicy Bypass -File scripts\analyze-routing.ps1 -Days 7
 
 - **Driver model is fixed at launch.** This hook only modulates *effort* per turn. To swap models you still need `/model` or to relaunch Claude Code.
 - **Guidance, not effort.** Hook output is plain context appended to your turn. It nudges depth within the session's effort level and cannot raise that level. The status line (`[auto-router] score N -> tier=ultrathink`) is informational. If you want the real `ultrathink` keyword, type it yourself.
-- **Measuring it.** Every log entry records `emitVersion`, `emitted` and `sessionEffort`. The analyzer splits output by all three, so v2 turns are never averaged together with keyword-era (v1) turns.
+- **Measuring it.** Every log entry records `emitVersion`, `emitted`, `sessionEffort` and `effortSource` (`transcript` / `env` / empty). The analyzer splits output by all three, so v2 turns are never averaged together with keyword-era (v1) turns.
 - **Subagent suggestions are nudges, not enforcement.** Claude decides whether to actually call the Task tool. In practice this is reliable when the suggestion clearly applies, but not 100%.
 - **Hook latency:** roughly 150–300 ms per prompt for PowerShell startup. Acceptable but real.
 - **Privacy:** the routing log records an 80-character preview of each prompt and the project path it fired in. The file lives in your user-global Claude folder and is never committed. Delete it any time.

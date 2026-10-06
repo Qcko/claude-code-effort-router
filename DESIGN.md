@@ -15,13 +15,13 @@ flowchart TD
     SC --> MW[Multi-work floor:<br/>work verb + sequence marker<br/>raises score to 4]
     MW --> T[Tier from score:<br/>none / think / think hard / ultrathink]
     T --> MO[Mechanical override-down<br/>from skill-effort.psd1]
-    MO --> E{CLAUDE_EFFORT is<br/>high / xhigh / max / ultracode?}
+    MO --> E{Session effort<br/>from last assistant turn<br/>is high / xhigh / max / ultracode?}
     E -- yes --> NL[No depth line]
     E -- no --> DL[Depth line from $depthLines:<br/>think hard = high depth<br/>ultrathink = maximum depth<br/>think and none = nothing]
     NL --> O[Stdout: status line,<br/>depth line if any,<br/>intent hint if any]
     DL --> O
     O --> C[Appended to the newest user turn<br/>as plain context text]
-    O --> L[routing-log.jsonl:<br/>tier, score, rawScore, multiWork,<br/>emitVersion, emitted, sessionEffort]
+    O --> L[routing-log.jsonl:<br/>tier, score, rawScore, multiWork,<br/>emitVersion, emitted,<br/>sessionEffort, effortSource]
     L --> A[analyze-routing.ps1:<br/>timestamp join to transcript output,<br/>split by emitVersion, effort, tier]
 ```
 
@@ -54,9 +54,20 @@ explicit: each tier emits a sentence the model acts on as text.
 - **Verify only on change.** "Verify before done" applies only when code or
   files changed, so questions and reviews do not spawn test runs.
 - **Depth into reasoning, not reply length.** Each line says this outright.
-- **`think` emits no depth line (staged rollout).** It is the most frequent
-  tier, so a line there costs the most output at the user's deliberately low
-  effort. Decide it from v2 data.
+- **`think` emits no depth line.** It is the most frequent tier, so a line there
+  costs the most output at the user's deliberately low effort. Reviewed on
+  06-10-2026 against 10 days of v2 data: `think` medians 5.1k output against
+  4.5k for `none`, so the tier already sits barely above no-guidance turns and
+  shows no under-serving that a line would fix. Kept silent.
+- **Session effort comes from the transcript.** `UserPromptSubmit` hooks get
+  neither the payload `effort` object nor `CLAUDE_EFFORT` (both are
+  tool-use-context only, code.claude.com/docs/en/hooks), which left
+  `sessionEffort` empty on every v2 row until 06-10-2026. Every assistant entry
+  in the transcript carries a top-level `effort`, so the hook takes the latest
+  non-sidechain one and falls back to the env var. It lags one prompt when the
+  user changes effort between turns, and the first prompt of a session (or one
+  whose 50-line tail holds no assistant entry) reads as unset, so a mismatch on
+  such rows is expected. `effortSource` logs which source won.
 - **Suppressed at high session effort.** `high` / `xhigh` / `max` / `ultracode`
   already reason deeply, and extra "think harder" text is the documented
   overthinking path. Intent hints still emit. Unset effort is treated as low.

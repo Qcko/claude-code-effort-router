@@ -13,7 +13,7 @@ The tier names are internal labels kept for continuity with the routing log. Non
 | `think hard` | `[auto-router: high depth] ...`    | Multiple concerns or moderate scope, and multi-work prompts ("fix X first, then Y"). |
 | `ultrathink` | `[auto-router: maximum depth] ...` | Architecture, debugging, multi-file refactors, and anything scored as complex. Optionally paired with a Task subagent suggestion. |
 
-The exact texts live in one table, `$depthLines`, in [hooks/route-hint.ps1](../hooks/route-hint.ps1). Each asks for reasoning before acting, verification only when code or files changed, and depth in reasoning rather than in reply length. Each also tells the model to proceed directly if the task proves simpler than it looked. When the session effort (`CLAUDE_EFFORT`) is `high`, `xhigh`, `max` or `ultracode`, no depth line is emitted. Guidance resets every turn.
+The exact texts live in one table, `$depthLines`, in [hooks/route-hint.ps1](../hooks/route-hint.ps1). Each asks for reasoning before acting, verification only when code or files changed, and depth in reasoning rather than in reply length. Each also tells the model to proceed directly if the task proves simpler than it looked. When the session effort (taken from the previous assistant turn in the transcript) is `high`, `xhigh`, `max` or `ultracode`, no depth line is emitted. Guidance resets every turn.
 
 ## How the hook chooses a tier
 

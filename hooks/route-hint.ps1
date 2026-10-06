@@ -45,6 +45,7 @@ if ($promptText.TrimStart().StartsWith('<agent-message ')) { exit 0 }
 # Read tail-only so this stays cheap on long sessions.
 $priorTail = $null
 $priorEndedWithQuestion = $false
+$transcriptEffort = ''
 $transcriptPath = [string]$payload.transcript_path
 if ($transcriptPath -and (Test-Path -LiteralPath $transcriptPath)) {
     try {
@@ -55,7 +56,8 @@ if ($transcriptPath -and (Test-Path -LiteralPath $transcriptPath)) {
             $line = $tail[$i]
             if (-not $line -or -not $line.Trim()) { continue }
             try { $obj = $line | ConvertFrom-Json } catch { continue }
-            if ($obj.type -ne 'assistant') { continue }
+            if ($obj.type -ne 'assistant' -or $obj.isSidechain) { continue }
+            if (-not $transcriptEffort -and $obj.effort) { $transcriptEffort = ([string]$obj.effort).Trim() }
             if (-not $obj.message -or -not $obj.message.content) { continue }
             $textBlocks = @($obj.message.content | Where-Object { $_.type -eq 'text' -and $_.text })
             if ($textBlocks.Count -eq 0) { continue }
@@ -364,7 +366,13 @@ $depthLines = @{
     'think hard' = '[auto-router: high depth] Think this through before acting: consider alternatives, trade-offs and edge cases. If you change code or files, verify the result (test, script or re-read) before calling it done. Keep the reply concise.'
     'ultrathink' = '[auto-router: maximum depth] This turn warrants careful, thorough reasoning before acting: compare approaches before committing, and consider failure modes. If you change code or files, verify before calling it done. Put the depth into reasoning, not reply length; if it proves simpler than it looked, proceed directly.'
 }
-$sessionEffort = ([string]$env:CLAUDE_EFFORT).Trim()
+# UserPromptSubmit hooks get neither the payload's effort object nor
+# CLAUDE_EFFORT (both are tool-use-context only), so take the level the
+# previous assistant turn ran at from the transcript. The env var stays as a
+# fallback in case a future Claude Code version exports it here.
+$envEffort = ([string]$env:CLAUDE_EFFORT).Trim()
+$sessionEffort = if ($transcriptEffort) { $transcriptEffort } else { $envEffort }
+$effortSource = if ($transcriptEffort) { 'transcript' } elseif ($envEffort) { 'env' } else { '' }
 $depthLine = Get-DepthLine -Tier $tier -SessionEffort $sessionEffort -Lines $depthLines
 $emitted = [bool]$depthLine
 
@@ -399,6 +407,7 @@ try {
         emitVersion            = $emitVersion
         emitted                = $emitted
         sessionEffort          = $sessionEffort
+        effortSource           = $effortSource
         intent                 = $intent
         promptLen              = $len
         fileRefs               = $fileRefs
