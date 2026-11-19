@@ -374,6 +374,27 @@ $envEffort = ([string]$env:CLAUDE_EFFORT).Trim()
 $sessionEffort = if ($transcriptEffort) { $transcriptEffort } else { $envEffort }
 $effortSource = if ($transcriptEffort) { 'transcript' } elseif ($envEffort) { 'env' } else { '' }
 $depthLine = Get-DepthLine -Tier $tier -SessionEffort $sessionEffort -Lines $depthLines
+
+# Same-window A/B: on prompts that would get a depth line, withhold it with
+# probability EFFORT_ROUTER_HOLDOUT (default 0.5; 0 ends the experiment, 1
+# forces holdout). Only the depth line varies -- status line and intent hint
+# emit in both arms -- so the analyzer's steer-vs-holdout split isolates it.
+function Get-AbArm {
+    param([string]$HoldoutSetting)
+    $holdout = 0.5
+    $parsed = 0.0
+    if ($HoldoutSetting -and [double]::TryParse($HoldoutSetting, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$parsed) -and -not [double]::IsNaN($parsed)) {
+        $holdout = [Math]::Min(1.0, [Math]::Max(0.0, $parsed))
+    }
+    if ((Get-Random -Minimum 0.0 -Maximum 1.0) -lt $holdout) { return 'holdout' }
+    return 'steer'
+}
+
+$abArm = $null
+if ($depthLine) {
+    $abArm = Get-AbArm -HoldoutSetting ([string]$env:EFFORT_ROUTER_HOLDOUT).Trim()
+    if ($abArm -eq 'holdout') { $depthLine = $null }
+}
 $emitted = [bool]$depthLine
 
 if ($tier -ne 'none') {
@@ -408,6 +429,8 @@ try {
         emitted                = $emitted
         sessionEffort          = $sessionEffort
         effortSource           = $effortSource
+        abArm                  = $abArm
+        depthEmitted           = [bool]$depthLine
         intent                 = $intent
         promptLen              = $len
         fileRefs               = $fileRefs

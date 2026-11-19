@@ -18,11 +18,13 @@ flowchart TD
     MO --> E{Session effort<br/>from last assistant turn<br/>is high / xhigh / max / ultracode?}
     E -- yes --> NL[No depth line]
     E -- no --> DL[Depth line from $depthLines:<br/>think hard = high depth<br/>ultrathink = maximum depth<br/>think and none = nothing]
+    DL --> AB{A/B draw, line eligible only:<br/>holdout with probability<br/>EFFORT_ROUTER_HOLDOUT, default 0.5}
+    AB -- holdout --> NL
+    AB -- steer --> O
     NL --> O[Stdout: status line,<br/>depth line if any,<br/>intent hint if any]
-    DL --> O
     O --> C[Appended to the newest user turn<br/>as plain context text]
-    O --> L[routing-log.jsonl:<br/>tier, score, rawScore, multiWork,<br/>emitVersion, emitted,<br/>sessionEffort, effortSource]
-    L --> A[analyze-routing.ps1:<br/>timestamp join to transcript output,<br/>split by emitVersion, effort, tier]
+    O --> L[routing-log.jsonl:<br/>tier, score, rawScore, multiWork,<br/>emitVersion, emitted,<br/>sessionEffort, effortSource, abArm]
+    L --> A[analyze-routing.ps1:<br/>timestamp join to transcript output,<br/>split by emitVersion, effort, tier,<br/>and steer vs holdout]
 ```
 
 ## Why text and not keywords
@@ -78,6 +80,21 @@ explicit: each tier emits a sentence the model acts on as text.
   `emitted` and `sessionEffort`. The analyzer groups by all three and reports
   medians. The v2 baseline starts after the multi-work floor (`192baae`) went
   live, so the same-day scoring changes do not confound it.
+- **Same-window A/B on the depth line (from 19-11-2026).** Comparing v1 and v2
+  across time windows is confounded: `none` itself fell from 5.5k to 3.9k
+  median output between them, so the workload changed. On 75 days of data
+  think hard was flat (16.6k v1, 15.8k v2), so the steering effect is unproven.
+  The hook now withholds the depth line at random on eligible prompts and logs
+  `abArm`. Only the depth line varies: the status line and intent hint emit in
+  both arms. Assignment is per prompt, not per session, because sessions hold
+  very uneven numbers of think hard prompts; earlier steered turns stay in
+  context on a holdout turn, which can only bias the result toward no effect.
+  `depthEmitted` records whether the depth line went out (`emitted` is also
+  true when only an intent hint did). The emit-version table leaves holdout
+  rows out, so v2 there still means "steered". Unparseable values fall back to
+  0.5, so check the log's `abArm` after changing the variable.
+  `EFFORT_ROUTER_HOLDOUT=0` ends it. Read the result once each arm has around
+  50 rows at one effort and tier.
 - **Out of scope:** changing session effort per prompt, emitting the literal
   `ultrathink`, re-tuning thresholds.
 

@@ -153,6 +153,7 @@ function Get-OutputSummary {
     Emit         = "v$($first.emitVersion)"
     Effort       = $first.sessionEffort
     Tier         = $first.tier
+    Arm          = $first.abArm
     Count        = $outputs.Count
     MedianOutput = $outputs[[int][Math]::Floor($outputs.Count / 2)]
     AvgOutput    = [int](($outputs | Measure-Object -Average).Average)
@@ -201,6 +202,7 @@ $rows = foreach ($d in $decisions) {
     emitVersion   = if ($d.emitVersion) { [int]$d.emitVersion } else { 1 }
     sessionEffort = Resolve-SessionEffort -Decision $d -Turn $turn
     emitted       = $d.emitted
+    abArm         = $d.abArm
   }
 }
 
@@ -244,8 +246,26 @@ $rows | Group-Object tier | Select-Object Name, Count | Sort-Object Name | Forma
 Write-Host '=== Counts by intent ===' -ForegroundColor Cyan
 $rows | Where-Object intent | Group-Object intent | Select-Object Name, Count | Sort-Object Name | Format-Table -AutoSize | Out-String | Write-Host
 
-Write-Host '=== Output tokens by emit version, session effort and tier ===' -ForegroundColor Cyan
-$rows | Where-Object { $_.output_tokens -ne $null } |
+Write-Host '=== Output tokens by emit version, session effort and tier (holdout rows excluded) ===' -ForegroundColor Cyan
+$rows | Where-Object { $_.output_tokens -ne $null -and $_.abArm -ne 'holdout' } |
   Group-Object emitVersion, sessionEffort, tier |
   ForEach-Object { Get-OutputSummary -Group $_ } |
-  Sort-Object Emit, Effort, Tier | Format-Table -AutoSize | Out-String | Write-Host
+  Sort-Object Emit, Effort, Tier |
+  Format-Table Emit, Effort, Tier, Count, MedianOutput, AvgOutput, MaxOutput -AutoSize | Out-String | Write-Host
+
+# Same-window A/B on the depth line: only rows where a line was eligible carry
+# an arm, so steer vs holdout within one effort and tier is a like-for-like split.
+$abRows = @($rows | Where-Object { $_.abArm -and $_.output_tokens -ne $null })
+if ($abRows.Count -gt 0) {
+  Write-Host '=== Depth-line A/B: steer vs holdout by session effort and tier ===' -ForegroundColor Cyan
+  # Uneven transcript matching between arms would bias the split; show it.
+  $rows | Where-Object abArm | Group-Object abArm | ForEach-Object {
+    $armMatched = @($_.Group | Where-Object { $_.output_tokens -ne $null }).Count
+    Write-Host ("  {0}: matched {1} of {2}" -f $_.Name, $armMatched, $_.Count)
+  }
+  $abRows |
+    Group-Object sessionEffort, tier, abArm |
+    ForEach-Object { Get-OutputSummary -Group $_ } |
+    Sort-Object Effort, Tier, Arm |
+    Format-Table Effort, Tier, Arm, Count, MedianOutput, AvgOutput, MaxOutput -AutoSize | Out-String | Write-Host
+}
